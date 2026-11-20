@@ -1,0 +1,22 @@
+# Giai đoạn 4 – bổ sung máy chủ GPU: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Đặt trong .env: LLM_MAIN_URL=http://vllm:8000/v1 ; VLLM_MODEL_DIR=<thư mục safetensors trong ./models>
+# Ứng dụng không phải sửa: LiteLLM tiếp tục công bố tên logic "chinh".
+services:
+  vllm:
+    image: ${IMG_VLLM:-vllm/vllm-openai:latest}
+    restart: unless-stopped
+    command: >
+      --model /models/${VLLM_MODEL_DIR:-Qwen3.6-27B-FP8} --served-model-name chinh
+      --host 0.0.0.0 --port 8000 --max-model-len ${VLLM_MAX_LEN:-65536}
+      --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3 --api-key ${LLM_BACKEND_KEY}
+    environment:
+      HF_HUB_OFFLINE: "1"
+      VLLM_NO_USAGE_STATS: "1"
+    volumes: ["./models:/models:ro"]
+    ipc: host
+    networks: [model]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]

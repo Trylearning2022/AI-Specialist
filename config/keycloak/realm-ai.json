@@ -1,0 +1,83 @@
+{
+  "realm": "ai",
+  "displayName": "Trợ lý AI nội bộ",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and passwordHistory(5)",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "internationalizationEnabled": true,
+  "supportedLocales": ["vi", "en"],
+  "defaultLocale": "vi",
+  "roles": {
+    "realm": [
+      {"name": "user", "description": "Người dùng"},
+      {"name": "reviewer", "description": "Cán bộ kiểm duyệt dữ liệu, xử lý phản hồi, phiếu hỗ trợ"},
+      {"name": "admin", "description": "Quản trị hệ thống"},
+      {"name": "cap-do-0", "description": "Được xem tài liệu độ mật Thường"},
+      {"name": "cap-do-1", "description": "Được xem tài liệu độ mật đến Mật (còn bị giới hạn bởi SYSTEM_MAX_CLEARANCE)"},
+      {"name": "cap-do-2", "description": "Được xem tài liệu độ mật đến Tối mật"},
+      {"name": "cap-do-3", "description": "Được xem tài liệu độ mật đến Tuyệt mật"}
+    ]
+  },
+  "defaultRole": {"name": "default-roles-ai", "composite": true, "composites": {"realm": ["user", "cap-do-0", "offline_access"]}},
+  "groups": [
+    {"name": "don-vi", "subGroups": [
+      {"name": "phong-ky-thuat"},
+      {"name": "van-phong"},
+      {"name": "tat-ca"}
+    ]}
+  ],
+  "clients": [
+    {
+      "clientId": "portal",
+      "name": "Cổng nghiệp vụ AI",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "${AI_PUBLIC_URL}",
+      "baseUrl": "/",
+      "redirectUris": ["${AI_PUBLIC_URL}/*"],
+      "webOrigins": ["${AI_PUBLIC_URL}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${AI_PUBLIC_URL}/*"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic"],
+      "optionalClientScopes": ["offline_access"],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {"full.path": "true", "claim.name": "groups", "access.token.claim": "true",
+                     "id.token.claim": "true", "userinfo.token.claim": "true"}
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "quantri",
+      "firstName": "Quản trị",
+      "lastName": "Hệ thống",
+      "enabled": true,
+      "realmRoles": ["default-roles-ai", "admin", "reviewer"],
+      "groups": ["/don-vi/phong-ky-thuat"],
+      "credentials": [{"type": "password", "value": "${KC_INIT_ADMIN_PASSWORD}", "temporary": true}],
+      "requiredActions": ["UPDATE_PASSWORD", "CONFIGURE_TOTP"]
+    }
+  ]
+}

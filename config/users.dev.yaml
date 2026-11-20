@@ -1,0 +1,23 @@
+# TÀI KHOẢN THỬ NGHIỆM – chỉ dùng khi AUTH_MODE=dev (không dùng trong vận hành chính thức).
+# Đăng nhập trên giao diện bằng cách chọn tên tài khoản; token gửi lên có dạng "dev-<tên>".
+users:
+  canbo:
+    name: "Nguyễn Văn Cán Bộ"
+    roles: [user]
+    units: [phong-ky-thuat]
+    clearance: 0
+  kiemduyet1:
+    name: "Trần Văn Kiểm Duyệt"
+    roles: [user, reviewer]
+    units: [phong-ky-thuat]
+    clearance: 1
+  kiemduyet2:
+    name: "Lê Thị Kiểm Duyệt"
+    roles: [user, reviewer]
+    units: [van-phong]
+    clearance: 1
+  quantri:
+    name: "Phạm Quản Trị"
+    roles: [user, reviewer, admin]
+    units: ["*"]
+    clearance: 1

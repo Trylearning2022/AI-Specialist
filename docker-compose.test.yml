@@ -1,0 +1,51 @@
+# CSDL phục vụ kiểm thử trên máy phát triển (không dùng cho vận hành):
+#   docker compose -f docker-compose.test.yml up -d --wait
+# --wait: chờ đến khi cả hai container báo "healthy" mới trả về.
+# Cổng 55432 (PostgreSQL, tài khoản ai/ai) và 56379 (Redis) – khớp mặc định của backend/tests/run_stack.py.
+# OCR (tùy chọn): thêm "--profile ocr" để chạy docling-serve ở cổng 5001.
+# Chỉ mở trên 127.0.0.1: máy khác trong mạng không kết nối được.
+name: ai-local-test
+services:
+  postgres:
+    image: postgres:17-bookworm
+    container_name: ai-test-postgres
+    environment:
+      POSTGRES_USER: ai          # tài khoản quản trị CSDL thử nghiệm
+      POSTGRES_PASSWORD: ai      # mật khẩu thử nghiệm – không dùng cho vận hành
+      POSTGRES_DB: ai            # CSDL mặc định; ai_exact_test do bộ kiểm thử tự tạo
+      TZ: Asia/Ho_Chi_Minh
+    ports: ["127.0.0.1:55432:5432"]
+    volumes: ["pgtest:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai -d ai"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7.4-bookworm
+    container_name: ai-test-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # thử nghiệm: không lưu xuống đĩa
+    ports: ["127.0.0.1:56379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  # Dịch vụ OCR, chuyển đổi PDF scan/ảnh – tùy chọn, chỉ chạy khi bật profile "ocr":
+  #   docker compose -f docker-compose.test.yml --profile ocr up -d
+  # Ảnh khoảng vài GB; lần đầu tải mất thời gian. Cần ~4 GB RAM khi xử lý.
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:latest
+    container_name: ai-test-docling
+    profiles: ["ocr"]
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "1800"   # OCR nhiều trang trên CPU laptop có thể mất vài phút
+    ports: ["127.0.0.1:5001:5001"]
+    volumes: ["doclingcache:/opt/app-root/src/.cache"]   # giữ mô hình OCR đã tải giữa các lần chạy
+    restart: unless-stopped
+volumes:
+  pgtest: {}
+  doclingcache: {}

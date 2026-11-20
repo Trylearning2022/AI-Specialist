@@ -1,0 +1,37 @@
+id: may-in-khong-in
+ten: Máy in không in được
+mo_ta: Xử lý trường hợp gửi lệnh in nhưng máy in không in
+tu_khoa: [máy in, không in, in không được, kẹt giấy]
+bat_dau: b1
+buoc:
+  b1:
+    hoi: "Máy in có đang bật nguồn và đèn báo màu xanh không?"
+    lua_chon:
+      - {nhan: "Có", den: b2}
+      - {nhan: "Không", den: b_nguon}
+  b_nguon:
+    huong_dan: "Kiểm tra dây nguồn, bật công tắc nguồn và chờ máy in khởi động xong (khoảng 1 phút)."
+    lua_chon:
+      - {nhan: "Đã in được", den: xong}
+      - {nhan: "Vẫn không in được", den: b2}
+  b2:
+    hoi: "Trên màn hình máy in có báo kẹt giấy hoặc hết giấy không?"
+    lua_chon:
+      - {nhan: "Có", den: b_giay}
+      - {nhan: "Không", den: b3}
+  b_giay:
+    huong_dan: "Mở nắp khay giấy, gỡ giấy kẹt theo chiều đi của giấy; bổ sung giấy vào khay."
+    lua_chon:
+      - {nhan: "Đã in được", den: xong}
+      - {nhan: "Vẫn không in được", den: b3}
+  b3:
+    huong_dan: "Trên máy tính: mở Settings > Printers, chọn máy in, xóa các lệnh in đang treo, sau đó in thử trang kiểm tra."
+    lua_chon:
+      - {nhan: "Đã in được", den: xong}
+      - {nhan: "Vẫn không in được", den: phieu}
+  xong:
+    ket_thuc: true
+    thong_bao: "Sự cố đã được khắc phục. Cảm ơn đồng chí."
+  phieu:
+    tao_phieu: true
+    thong_bao: "Đã tạo phiếu yêu cầu hỗ trợ, cán bộ kỹ thuật sẽ liên hệ trực tiếp."

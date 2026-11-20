@@ -1,0 +1,11 @@
+global: { scrape_interval: 30s }
+scrape_configs:
+  - job_name: dich-vu
+    metrics_path: /metrics
+    static_configs:
+      - targets: [gateway:8000, orchestrator:8000, search:8000, exact:8000, ingest:8000, summary:8000, support:8000, audit:8000]
+  - job_name: mo-hinh
+    metrics_path: /metrics
+    authorization: { credentials_file: /etc/prometheus/llm_key }
+    static_configs:
+      - targets: [llm-main:8080]

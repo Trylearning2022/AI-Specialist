@@ -1,0 +1,28 @@
+# Cổng mô hình LiteLLM: ứng dụng chỉ dùng tên logic "chinh", "nho".
+# Đổi engine (llama.cpp CPU → vLLM GPU) chỉ cần đổi LLM_MAIN_URL / LLM_SMALL_URL trong .env.
+model_list:
+  - model_name: chinh
+    litellm_params:
+      model: openai/chinh
+      api_base: os.environ/LLM_MAIN_URL
+      api_key: os.environ/LLM_BACKEND_KEY
+      timeout: 900
+      stream_timeout: 900
+  - model_name: nho
+    litellm_params:
+      model: openai/nho
+      api_base: os.environ/LLM_SMALL_URL
+      api_key: os.environ/LLM_BACKEND_KEY
+      timeout: 300
+
+router_settings:
+  num_retries: 1
+  fallbacks: [{"chinh": ["nho"]}]
+
+litellm_settings:
+  telemetry: false
+  drop_params: false
+  request_timeout: 900
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

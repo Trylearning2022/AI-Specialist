@@ -1,0 +1,37 @@
+id: usb-token-khong-nhan
+ten: Máy tính không nhận thiết bị USB Token
+mo_ta: Xử lý khi cắm USB Token nhưng phần mềm ký số không nhận thiết bị
+tu_khoa: [usb token, token, không nhận, chữ ký số, ký số]
+bat_dau: b1
+buoc:
+  b1:
+    hoi: "Đèn trên thiết bị USB Token có sáng khi cắm vào máy tính không?"
+    lua_chon:
+      - {nhan: "Có", den: b2}
+      - {nhan: "Không", den: b_cong}
+  b_cong:
+    huong_dan: "Cắm thiết bị sang cổng USB khác (ưu tiên cổng phía sau thân máy), không dùng bộ chia USB."
+    lua_chon:
+      - {nhan: "Đèn đã sáng", den: b2}
+      - {nhan: "Đèn vẫn không sáng", den: phieu}
+  b2:
+    hoi: "Phần mềm quản lý thiết bị (middleware) có hiển thị thiết bị không?"
+    lua_chon:
+      - {nhan: "Có", den: b3}
+      - {nhan: "Không", den: b_driver}
+  b_driver:
+    huong_dan: "Cài đặt lại phần mềm middleware theo bộ cài do Phòng Kỹ thuật cung cấp, khởi động lại máy tính."
+    lua_chon:
+      - {nhan: "Đã nhận thiết bị", den: b3}
+      - {nhan: "Vẫn không nhận", den: phieu}
+  b3:
+    hoi: "Ký thử một văn bản: có ký được không?"
+    lua_chon:
+      - {nhan: "Ký được", den: xong}
+      - {nhan: "Báo lỗi chứng thư", den: phieu}
+  xong:
+    ket_thuc: true
+    thong_bao: "Thiết bị đã hoạt động bình thường."
+  phieu:
+    tao_phieu: true
+    thong_bao: "Đã tạo phiếu yêu cầu hỗ trợ; đồng chí mang thiết bị tới Phòng Kỹ thuật nếu được yêu cầu."

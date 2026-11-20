@@ -1,0 +1,316 @@
+# =====================================================================
+# Hệ thống AI Local – Giai đoạn 1 (máy chủ CPU). Toàn bộ chạy trên mạng nội bộ.
+#   docker compose up -d                          # chạy hệ thống
+#   docker compose --profile mo-hinh-nho up -d    # chạy thêm mô hình nhỏ riêng (Cấp 2)
+#   docker compose --profile giam-sat up -d       # chạy thêm Prometheus
+#   docker compose --profile gitea up -d          # chạy kho Gitea cho văn bản chuẩn
+#   docker compose run --rm tools python -m tools.seed /seed   # nạp dữ liệu mẫu
+# Mạng "app", "model", "data" là mạng nội bộ (internal): không có đường ra ngoài.
+# =====================================================================
+name: ai-local
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://ai:${POSTGRES_PASSWORD}@postgres:5432/ai
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  QDRANT_API_KEY: ${QDRANT_API_KEY}
+  INTERNAL_SECRET: ${INTERNAL_SECRET}
+  SYSTEM_MAX_CLEARANCE: ${SYSTEM_MAX_CLEARANCE:-0}
+  LLM_BASE_URL: http://llm-gateway:4000/v1
+  LLM_API_KEY: ${LITELLM_MASTER_KEY}
+  EMBED_URL: http://embed:8080
+  EMBED_API_KEY: ${LLM_BACKEND_KEY}
+  RERANK_URL: ${RERANK_URL:-}
+  RERANK_THRESHOLD: ${RERANK_THRESHOLD:--2.0}
+  DOCLING_URL: http://docling:5001
+  DOCLING_OCR_ENGINE: ${DOCLING_OCR_ENGINE:-easyocr}
+  DOCLING_OCR_LANG: ${DOCLING_OCR_LANG:-vi,en}
+  DATA_DIR: /data
+  KB_DIR: /kb
+  KB_GIT_REMOTE: ${KB_GIT_REMOTE:-}
+  AUTH_MODE: ${AUTH_MODE:-oidc}
+  OIDC_ISSUER: ${AI_PUBLIC_URL}/auth/realms/ai
+  OIDC_JWKS_URL: http://keycloak:8080/auth/realms/ai/protocol/openid-connect/certs
+  CTX_BUDGET_SOURCES: ${CTX_BUDGET_SOURCES:-8000}
+  ANSWER_MAX_TOKENS: ${ANSWER_MAX_TOKENS:-1024}
+  EXACT_LLM_INTERPRET: ${EXACT_LLM_INTERPRET:-false}
+  # Truy xuất Luồng A (docs/tinh-chinh-truy-xuat.md)
+  SEARCH_TOP_K: ${SEARCH_TOP_K:-6}
+  SEARCH_CANDIDATES: ${SEARCH_CANDIDATES:-30}
+  SEARCH_SECTION_MAX_TOKENS: ${SEARCH_SECTION_MAX_TOKENS:-1200}
+  SEARCH_MAX_PER_DOC: ${SEARCH_MAX_PER_DOC:-3}
+  RERANK_MARGIN: ${RERANK_MARGIN:-7.0}
+  ANSWER_TEMPERATURE: ${ANSWER_TEMPERATURE:-0.1}
+  CHUNK_MAX_TOKENS: ${CHUNK_MAX_TOKENS:-500}
+  VERIFY_GROUNDING: ${VERIFY_GROUNDING:-true}
+  AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-6}
+  VERIFY_STRICT_A: ${VERIFY_STRICT_A:-true}
+  ENABLE_AGENT: ${ENABLE_AGENT:-true}
+  ENABLE_MCP: ${ENABLE_MCP:-true}
+  RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-60}
+  RATE_LIMIT_CHAT_PER_MIN: ${RATE_LIMIT_CHAT_PER_MIN:-15}
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+  TICKET_WEBHOOK_URL: ${TICKET_WEBHOOK_URL:-}
+  ORCHESTRATOR_URL: http://orchestrator:8000
+  SEARCH_URL: http://search:8000
+  EXACT_URL: http://exact:8000
+  INGEST_URL: http://ingest:8000
+  SUMMARY_URL: http://summary:8000
+  SUPPORT_URL: http://support:8000
+  AUDIT_URL: http://audit:8000
+
+x-app: &app
+  image: ${IMG_APP:-ai-local/backend:1.0.0}
+  build: { context: ., dockerfile: backend/Dockerfile }
+  restart: unless-stopped
+  environment: *app-env
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  networks: [app, data, model]
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_started }
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 5
+
+x-llama: &llama
+  image: ${IMG_LLAMACPP:-ghcr.io/ggml-org/llama.cpp:server}
+  restart: unless-stopped
+  volumes: ["./models:/models:ro"]
+  networks: [model]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  cap_add: [IPC_LOCK]
+  ulimits: { memlock: -1 }
+
+services:
+  # ------------------------- Lớp biên -------------------------
+  nginx:
+    image: ${IMG_NGINX:-nginx:1.27-alpine}
+    restart: unless-stopped
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/pki:/etc/nginx/pki:ro
+    networks: [edge, app]
+    depends_on: [gateway, portal, keycloak]
+
+  keycloak:
+    image: ${IMG_KEYCLOAK:-quay.io/keycloak/keycloak:26.4}
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ai
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: ${AI_PUBLIC_URL}/auth
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-kcadmin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      AI_PUBLIC_URL: ${AI_PUBLIC_URL}
+      KC_INIT_ADMIN_PASSWORD: ${KC_INIT_ADMIN_PASSWORD}
+    volumes: ["./config/keycloak/realm-ai.json:/opt/keycloak/data/import/realm-ai.json:ro"]
+    networks: [edge, app, data]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  portal:
+    image: ${IMG_PORTAL:-ai-local/portal:1.0.0}
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    restart: unless-stopped
+    networks: [app]
+
+  # ------------------------- Lớp ứng dụng, điều phối, nghiệp vụ -------------------------
+  gateway:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.gateway.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]
+    networks: [app, data]
+
+  orchestrator:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.orchestrator.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+  search:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.search.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    depends_on: { qdrant: { condition: service_started }, embed: { condition: service_started } }
+
+  exact:
+    <<: *app
+    # Chỉ mục FTS nằm trong PostgreSQL (dùng chung); ghi Git được khóa liên tiến trình → chạy nhiều tiến trình được
+    command: ["python", "-m", "uvicorn", "services.exact.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes: ["kb:/kb"]
+
+  ingest:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.ingest.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes: ["appdata:/data"]
+
+  ingest-worker:
+    <<: *app
+    command: ["celery", "-A", "aicommon.queue", "worker", "-Q", "ingest", "-c", "2", "-n", "ingest@%h", "--loglevel=INFO"]
+    volumes: ["appdata:/data"]
+    healthcheck: { disable: true }
+
+  summary:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.summary.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  summary-worker:
+    <<: *app
+    command: ["celery", "-A", "aicommon.queue", "worker", "-Q", "summary", "-c", "2", "-n", "summary@%h", "--loglevel=INFO"]
+    healthcheck: { disable: true }
+
+  support:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.support.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  audit:
+    <<: *app
+    # 01 bản duy nhất để bảo đảm thứ tự chuỗi băm nhật ký kiểm toán
+    command: ["python", "-m", "uvicorn", "services.audit.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  tools:
+    <<: *app
+    profiles: [tools]
+    restart: "no"
+    command: ["python", "-m", "tools.seed", "/seed"]
+    volumes: ["./kb-seed:/seed:ro", "appdata:/data"]
+    healthcheck: { disable: true }
+
+  # ------------------------- Lớp mô hình (không có đường ra ngoài) -------------------------
+  llm-gateway:
+    image: ${IMG_LITELLM:-ghcr.io/berriai/litellm:main-stable}
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LLM_BACKEND_KEY: ${LLM_BACKEND_KEY}
+      LLM_MAIN_URL: ${LLM_MAIN_URL:-http://llm-main:8080/v1}
+      LLM_SMALL_URL: ${LLM_SMALL_URL:-http://llm-main:8080/v1}
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      LITELLM_TELEMETRY: "False"
+      NO_DOCS: "True"
+    volumes: ["./config/litellm.yaml:/app/config.yaml:ro"]
+    networks: [model]
+    security_opt: ["no-new-privileges:true"]
+
+  llm-main:
+    <<: *llama
+    command: >
+      -m /models/${LLM_MAIN_FILE} --host 0.0.0.0 --port 8080 --alias chinh
+      -c ${LLM_MAIN_CTX:-65536} --parallel ${LLM_MAIN_PARALLEL:-4} -t ${LLM_MAIN_THREADS:-16}
+      --jinja --metrics --cache-reuse 256 --api-key ${LLM_BACKEND_KEY} ${LLM_MAIN_EXTRA:-}
+
+  llm-small:
+    <<: *llama
+    profiles: [mo-hinh-nho]
+    command: >
+      -m /models/${LLM_SMALL_FILE} --host 0.0.0.0 --port 8080 --alias nho
+      -c ${LLM_SMALL_CTX:-16384} --parallel ${LLM_SMALL_PARALLEL:-4} -t ${LLM_SMALL_THREADS:-8}
+      --jinja --metrics --cache-reuse 256 --reasoning-budget 0 --api-key ${LLM_BACKEND_KEY}
+
+  embed:
+    <<: *llama
+    command: >
+      -m /models/${EMBED_FILE} --host 0.0.0.0 --port 8080 --embedding --pooling cls
+      -c 8192 -b 4096 -ub 4096 --parallel 4 -t ${EMBED_THREADS:-8} --api-key ${LLM_BACKEND_KEY}
+
+  rerank:
+    <<: *llama
+    command: >
+      -m /models/${RERANK_FILE} --host 0.0.0.0 --port 8080 --reranking
+      -c 8192 -b 4096 -ub 4096 --parallel 4 -t ${RERANK_THREADS:-8} --api-key ${LLM_BACKEND_KEY}
+
+  docling:
+    image: ${IMG_DOCLING:-quay.io/docling-project/docling-serve-cpu:latest}
+    restart: unless-stopped
+    environment:
+      DOCLING_SERVE_MAX_SYNC_WAIT: "900"
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+      HF_HUB_OFFLINE: "1"
+    networks: [model]
+
+  # ------------------------- Lớp dữ liệu -------------------------
+  postgres:
+    image: ${IMG_POSTGRES:-postgres:17-bookworm}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai -d ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: ${IMG_REDIS:-redis:7.4-bookworm}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "300", "10"]
+    volumes: ["redisdata:/data"]
+    networks: [data]
+
+  qdrant:
+    image: ${IMG_QDRANT:-qdrant/qdrant:latest}
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes: ["qdrant:/qdrant/storage"]
+    networks: [data]
+
+  gitea:
+    image: ${IMG_GITEA:-gitea/gitea:1.24-rootless}
+    profiles: [gitea]
+    restart: unless-stopped
+    environment:
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: postgres:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: ai
+      GITEA__database__PASSWD: ${POSTGRES_PASSWORD}
+      GITEA__server__ROOT_URL: http://${AI_HOST}:3000/
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    volumes: ["gitea:/var/lib/gitea", "gitea-cfg:/etc/gitea"]
+    ports: ["3000:3000"]
+    networks: [edge, data]
+
+  prometheus:
+    image: ${IMG_PROMETHEUS:-prom/prometheus:latest}
+    profiles: [giam-sat]
+    restart: unless-stopped
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/llm_key:/etc/prometheus/llm_key:ro
+    ports: ["127.0.0.1:9090:9090"]
+    networks: [app, model, edge]
+
+networks:
+  edge: {}
+  app: { internal: true }
+  model: { internal: true }
+  data: { internal: true }
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  qdrant: {}
+  kb: {}
+  appdata: {}
+  gitea: {}
+  gitea-cfg: {}
