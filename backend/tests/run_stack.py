@@ -1,6 +1,6 @@
 """Trình chạy hệ thống thử nghiệm – đa nền tảng (Windows, Linux, macOS), KHÔNG cần mô hình thật.
 
-Chạy toàn bộ 8 dịch vụ backend + Celery worker + máy chủ mô hình giả lập trên máy phát triển.
+Chạy toàn bộ 9 dịch vụ backend + 2 Celery worker (nạp/tổng hợp; tác vụ dài) + máy chủ mô hình giả lập trên máy phát triển.
 PostgreSQL và Redis lấy từ docker-compose.test.yml (hoặc máy chủ sẵn có, khai báo qua biến môi trường).
 
     python tests/run_stack.py            # chạy và giữ ở cửa sổ hiện tại, Ctrl+C để dừng tất cả
@@ -42,6 +42,7 @@ SERVICES = [  # (tên, module, cổng)
     ("summary", "services.summary.app:app", 8105),
     ("support", "services.support.app:app", 8106),
     ("audit", "services.audit.app:app", 8107),
+    ("agent", "services.agent.app:app", 8108),
 ]
 
 
@@ -134,6 +135,9 @@ def env() -> dict:
         "GLOSSARY_FILE": str(ROOT / "glossary" / "thuat-ngu.md"), "SUPPORT_DIR": str(ROOT / "support"),
         "DEV_USERS_FILE": str(ROOT / "config" / "users.dev.yaml"),
         "RATE_LIMIT_PER_MIN": "5000", "RATE_LIMIT_CHAT_PER_MIN": "500",
+        # Giám định dữ liệu: chế độ giả lập chỉ chạy khi bấm (kiểm thử tất định); mô hình thật: theo lịch
+        "QA_INTERVAL_MIN": os.getenv("QA_INTERVAL_MIN", "0"), "QA_LLM_MODE": os.getenv("QA_LLM_MODE", "on"),
+        "AGENT_YIELD_MAX_S": os.getenv("AGENT_YIELD_MAX_S", "5"),
     })
     if REAL:
         e.update({
@@ -150,6 +154,11 @@ def env() -> dict:
             "SEARCH_CANDIDATES": os.getenv("SEARCH_CANDIDATES", "20"),         # ứng viên xếp hạng lại
             "SEARCH_SECTION_MAX_TOKENS": os.getenv("SEARCH_SECTION_MAX_TOKENS", "900"),
             "AGENT_TIMEOUT_S": os.getenv("AGENT_TIMEOUT_S", "600"),
+            # Tác vụ dài (phân tích, soạn thảo, tổng hợp) trên CPU: phần nhỏ, nhường mô hình cho hỏi đáp trực tiếp
+            "AGENT_PART_TOKENS": os.getenv("AGENT_PART_TOKENS", "2500"),
+            "AGENT_MAX_CRITERIA": os.getenv("AGENT_MAX_CRITERIA", "20"),  # bộ phan-tich-co-yeu: 20 tiêu chí, phần lớn lọc bằng từ khóa
+            "AGENT_YIELD_MAX_S": os.getenv("AGENT_YIELD_MAX_S", "180"),
+            "QA_INTERVAL_MIN": os.getenv("QA_INTERVAL_MIN", "120"), "QA_LLM_MODE": os.getenv("QA_LLM_MODE", "auto"),
         })
     for name, _, port in SERVICES:
         if name == "mock-llm":
@@ -195,7 +204,12 @@ def start() -> list[subprocess.Popen]:
     log = open(RUN / "logs" / "worker.log", "w", encoding="utf-8")
     pool = ["-P", "solo"] if WIN else ["-c", "2"]  # Windows không hỗ trợ prefork của Celery
     procs.append(subprocess.Popen([sys.executable, "-m", "celery", "-A", "aicommon.queue", "worker", "-Q",
-                                   "ingest,summary", "--loglevel=WARNING", *pool],
+                                   "ingest,summary", "-n", "main@%h", "--loglevel=WARNING", *pool],
+                                  cwd=BACKEND, env=e, stdout=log, stderr=subprocess.STDOUT, creationflags=flags))
+    # Tác vụ dài chạy ở tiến trình riêng, 01 luồng: không chặn việc nạp dữ liệu, lần lượt dùng mô hình
+    log = open(RUN / "logs" / "agent-worker.log", "w", encoding="utf-8")
+    procs.append(subprocess.Popen([sys.executable, "-m", "celery", "-A", "aicommon.queue", "worker", "-Q", "agent",
+                                   "-n", "agent@%h", "--loglevel=WARNING", *(["-P", "solo"] if WIN else ["-c", "1"])],
                                   cwd=BACKEND, env=e, stdout=log, stderr=subprocess.STDOUT, creationflags=flags))
     return procs
 
@@ -203,7 +217,8 @@ def start() -> list[subprocess.Popen]:
 def wait_ready(procs, timeout=90) -> dict:
     t0 = time.time()
     while time.time() - t0 < timeout:
-        dead = [SERVICES[i][0] if i < len(SERVICES) else "worker" for i, p in enumerate(procs) if p.poll() is not None]
+        dead = [SERVICES[i][0] if i < len(SERVICES) else f"worker-{i - len(SERVICES)}"
+                for i, p in enumerate(procs) if p.poll() is not None]
         if dead:
             return {"status": "dead", "dead": dead}
         try:
@@ -228,16 +243,9 @@ def stop(procs):
 
 
 def seed():
-    """Nạp kb-seed qua đúng quy trình nạp – duyệt (bỏ qua nếu kho văn bản chuẩn đã có dữ liệu)."""
-    h = {"Authorization": "Bearer dev-canbo"}
-    try:
-        docs = httpx.get("http://127.0.0.1:8100/api/exact/catalog", headers=h, timeout=30).json()["docs"]
-    except Exception:
-        docs = []
-    if docs:
-        print(f"Kho văn bản chuẩn đã có {len(docs)} văn bản – bỏ qua nạp dữ liệu mẫu.")
-        return
-    print("Nạp dữ liệu mẫu kb-seed (mô hình thật: có thể mất vài phút)…")
+    """Nạp kb-seed qua đúng quy trình nạp – duyệt. Tài liệu đã có (cùng tên) được bỏ qua, nên chạy lại --seed
+    sau khi cập nhật phiên bản sẽ chỉ bổ sung tài liệu mẫu mới."""
+    print("Nạp dữ liệu mẫu kb-seed còn thiếu (mô hình thật: mỗi tài liệu vài chục giây)…")
     r = subprocess.run([sys.executable, "-m", "tools.seed", str(ROOT / "kb-seed")], cwd=BACKEND, env=env())
     if r.returncode != 0:
         print("[CẢNH BÁO] Nạp dữ liệu mẫu chưa hoàn tất – xem nhật ký ingest.log, worker.log.")

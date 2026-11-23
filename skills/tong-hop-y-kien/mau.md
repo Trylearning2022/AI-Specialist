@@ -4,4 +4,6 @@
 
 ## 2. Ý kiến theo từng điều, khoản
 
-## 3. Đơn vị nhất trí toàn văn
+## 3. Ý kiến liên quan thẩm quyền, mật mã, căn cứ pháp lý
+
+## 4. Đơn vị nhất trí toàn văn

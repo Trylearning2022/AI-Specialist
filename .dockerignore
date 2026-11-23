@@ -8,3 +8,8 @@ frontend/dist
 **/__pycache__
 **/.pytest_cache
 **/.ruff_cache
+documents
+.venv*
+.test-run*
+out-models
+llama.cpp

@@ -3,9 +3,12 @@
 FROM python:3.12-slim-bookworm
 
 ARG PIP_OFFLINE=0
+# 1: cài LibreOffice (≈ 400 MB) để nạp tệp .doc/.xls cũ – cần khi nạp kho văn bản đã ban hành nhiều năm
+ARG INSTALL_LIBREOFFICE=0
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTHONPATH=/app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends git pandoc curl tini \
+    && if [ "$INSTALL_LIBREOFFICE" = "1" ]; then apt-get install -y --no-install-recommends libreoffice-writer-nogui libreoffice-calc-nogui; fi \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 10001 app && useradd -u 10001 -g app -m -s /usr/sbin/nologin app
 

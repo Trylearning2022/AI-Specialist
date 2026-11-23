@@ -7,7 +7,7 @@ rand() { openssl rand -base64 33 | tr -d '/+=' | cut -c1-32; }
 while grep -q "__SINH_TU_DONG__" .env; do
   sed -i "0,/__SINH_TU_DONG__/s//$(rand)/" .env
 done
-set -a; . ./.env; set +a
+. scripts/lib-env.sh; load_env .env
 [ -f config/pki/server.crt ] || scripts/gen-certs.sh "$AI_HOST"
 printf "%s" "$LLM_BACKEND_KEY" > config/prometheus/llm_key && chmod 600 config/prometheus/llm_key
 

@@ -2,10 +2,11 @@
 // câu trả lời đang sinh vẫn tiếp tục chạy nền.
 import { reactive } from 'vue'
 import { api } from './api'
+import { refreshActive } from './tasks'
 import { toast } from './ui'
 
 export const chat = reactive({
-  convs: [], convId: null, messages: [], busy: false, mode: 'tu_dong', loai: '', draft: '',
+  convs: [], convId: null, messages: [], busy: false, mode: 'tu_dong', loai: '', draft: '', files: [],
   panel: { open: false, kind: 'sources', sources: [], hl: 0, doc: null, sec: null }, now: Date.now(),
 })
 let ctrl = null
@@ -27,8 +28,11 @@ export async function openConv(id) {
   if (chat.busy) stop()
   const c = await api.get('/chat/conversations/' + id)
   chat.convId = id
-  chat.messages = c.messages.map((m) => ({
+  chat.messages = c.messages.map((m, i, all) => ({
     ...m, data: { ...(m.data || {}), message_id: m.id, route: m.route },
+    plan: m.data?.trace?.steps || [],
+    // câu hỏi lại đã được trả lời (có tin nhắn người dùng phía sau) thì không cho chọn lại
+    clarified: !!m.data?.clarify && i < all.length - 1,
   }))
   const last = [...chat.messages].reverse().find((m) => m.data?.sources?.length)
   chat.panel.sources = last?.data.sources || []
@@ -49,35 +53,42 @@ export function stop() {
   ctrl?.abort()
 }
 
-/** Gửi câu hỏi; onConv(id) được gọi khi máy chủ cấp mã hội thoại mới. */
-export async function send(text, { mode, onConv } = {}) {
+/** Gửi câu hỏi. opts: mode, onConv(id) khi máy chủ cấp mã hội thoại mới, attachments [{id, filename}],
+ *  clarify {original, answer} khi trả lời câu hỏi làm rõ. */
+export async function send(text, { mode, onConv, attachments = [], clarify = null } = {}) {
   text = (text || '').trim()
   if (!text || chat.busy) return
   chat.busy = true
-  chat.messages.push({ role: 'user', content: text })
-  const m = reactive({ role: 'assistant', content: '', data: {}, steps: [], pending: true, status: 'Đang tiếp nhận câu hỏi…', t0: Date.now() })
+  chat.messages.push({ role: 'user', content: text, data: { files: attachments.map((a) => a.filename) } })
+  const m = reactive({ role: 'assistant', content: '', data: {}, plan: [], pending: true, status: 'Đang tiếp nhận câu hỏi…', t0: Date.now() })
   chat.messages.push(m)
   ctrl = new AbortController()
   ticker = setInterval(() => { chat.now = Date.now() }, 500)
   const f = chat.loai ? { loai: chat.loai } : {}
   try {
-    await api.stream('/chat/chat', { message: text, conversation_id: chat.convId, mode: mode || chat.mode, filters: f, stream: true },
-      (ev, d) => {
-        if (ev === 'start') {
-          m.data.route = d.route; m.data.route_label = d.route_label
-          if (!chat.convId) { chat.convId = d.conversation_id; onConv?.(d.conversation_id) }
-        } else if (ev === 'status') m.status = d.text
-        else if (ev === 'meta') {
-          if (d.sources) { m.data.sources = d.sources; chat.panel.sources = d.sources }
-          if (d.exact_blocks) m.data.exact_blocks = d.exact_blocks
-          if (d.trees) m.data.trees = d.trees
-        } else if (ev === 'delta') { if (!m.first) m.first = Date.now(); m.content += d.text; m.status = '' }
-        else if (ev === 'step') m.steps.push(d)
-        else if (ev === 'final') {
-          m.content = d.answer; m.data = { ...m.data, ...d }; m.pending = false; m.t1 = Date.now()
-          if (d.sources?.length) chat.panel.sources = d.sources
-        }
-      }, ctrl.signal)
+    await api.stream('/chat/chat', {
+      message: text, conversation_id: chat.convId, mode: clarify ? 'tu_dong' : (mode || chat.mode), filters: f, stream: true,
+      attachments: attachments.map((a) => a.id), clarify,
+    }, (ev, d) => {
+      if (ev === 'start') {
+        m.data.route = d.route; m.data.route_label = d.route_label
+        if (!chat.convId) { chat.convId = d.conversation_id; onConv?.(d.conversation_id) }
+      } else if (ev === 'status') m.status = d.text
+      else if (ev === 'plan') m.plan = d.steps.map((x) => ({ ...x, status: 'cho' }))
+      else if (ev === 'step') {
+        const x = m.plan.find((p) => p.id === d.id)
+        const upd = { ...d, ...(d.status === 'dang_chay' ? { started: new Date().toISOString() } : {}) }
+        if (x) Object.assign(x, upd); else m.plan.push(upd)
+      } else if (ev === 'meta') {
+        if (d.sources) { m.data.sources = d.sources; chat.panel.sources = d.sources }
+        if (d.exact_blocks) m.data.exact_blocks = d.exact_blocks
+      } else if (ev === 'delta') { if (!m.first) m.first = Date.now(); m.content += d.text; m.status = '' }
+      else if (ev === 'final') {
+        m.content = d.answer; m.data = { ...m.data, ...d }; m.pending = false; m.t1 = Date.now()
+        if (d.trace?.steps?.length) m.plan = d.trace.steps
+        if (d.sources?.length) chat.panel.sources = d.sources
+      }
+    }, ctrl.signal)
   } catch (e) {
     if (e.name === 'AbortError') { m.stopped = true; if (!m.content) m.content = '_Đã dừng theo yêu cầu._' }
     else { m.error = e.message; toast(e.message, 'err') }
@@ -88,14 +99,22 @@ export async function send(text, { mode, onConv } = {}) {
     clearInterval(ticker)
     ctrl = null
     loadConvs()
+    if (m.data?.task) refreshActive()
   }
+}
+
+/** Trả lời câu hỏi làm rõ: hiển thị lựa chọn, gửi kèm câu hỏi gốc để máy chủ ghép và không hỏi lại lần hai. */
+export function answerClarify(m, label, value) {
+  const c = m.data.clarify
+  send(label, { clarify: { original: c.original, answer: value ?? label } })
 }
 
 /** Hỏi lại câu hỏi ngay trước câu trả lời m */
 export function retry(m) {
   const i = chat.messages.indexOf(m)
   const q = [...chat.messages.slice(0, i)].reverse().find((x) => x.role === 'user')
-  if (q) send(q.content, { mode: m.data?.route && m.data.route !== 'chao_hoi' ? m.data.route : undefined })
+  const keep = ['chinh_xac', 'tra_cuu', 'ho_tro', 'tim_tai_lieu', 'tac_tu']
+  if (q) send(q.content, { mode: keep.includes(m.data?.route) ? m.data.route : undefined })
 }
 
 export async function rate(m, rating, comment = '') {

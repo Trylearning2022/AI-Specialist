@@ -1,6 +1,6 @@
 # Hệ thống AI Local nội bộ
 
-Mã nguồn hoàn chỉnh của hệ thống AI cục bộ theo *Phương án tổng thể xây dựng hệ thống AI Local*: tra cứu tài liệu nội bộ có trích dẫn, tra cứu chính xác văn bản chuẩn (trích nguyên văn), tổng hợp báo cáo theo mẫu, hỗ trợ kỹ thuật. Hệ thống chạy hoàn toàn trên mạng nội bộ, trên máy chủ chỉ có CPU, và nâng cấp lên GPU mà không phải sửa mã ứng dụng.
+Mã nguồn hoàn chỉnh của hệ thống AI cục bộ theo *Phương án tổng thể xây dựng hệ thống AI Local*: tra cứu tài liệu nội bộ có trích dẫn, tra cứu chính xác văn bản chuẩn (trích nguyên văn), hỗ trợ kỹ thuật, phân tích văn bản mới theo bộ tiêu chí ngành, soạn văn bản tham mưu, tổng hợp báo cáo chung, giám định chất lượng dữ liệu và giám sát hệ thống. Hệ thống chạy hoàn toàn trên mạng nội bộ, trên máy chủ chỉ có CPU, và nâng cấp lên GPU mà không phải sửa mã ứng dụng.
 
 **Đơn vị chỉ cần bổ sung tệp mô hình** (GGUF) vào thư mục `models/` – xem [models/README.md](models/README.md).
 
@@ -15,10 +15,11 @@ Trình duyệt ──HTTPS──> Nginx (biên, TLS) ──> portal (Vue 3)
                                                  │
      ┌────────────── orchestrator (HARNESS: định tuyến · Context Builder · Verifier · vòng lặp tác tử · MCP) ─┐
      │                  │                     │                      │                    │                 │
- search-svc        exact-svc            summary-svc + worker    support-svc        ingest-svc + worker   audit-svc
- Luồng A           Luồng B              Map → tính bằng mã      cây xử lý sự cố,   chuyển đổi, làm     nhật ký chuỗi
- vector+BM25,RRF   Markdown nguyên văn  → Reduce → Verifier     phiếu yêu cầu      sạch, kiểm duyệt   băm (Redis Stream)
- rerank            Git + PostgreSQL FTS → DOCX (pandoc)                            2 cấp cho Luồng B
+ search-svc        exact-svc            agent-svc + agent-worker      support-svc     ingest-svc + worker   audit-svc
+ Luồng A           Luồng B              tác vụ dài từng bước: phân    phiếu yêu cầu   chuyển đổi, làm     nhật ký chuỗi băm;
+ vector+BM25,RRF   Markdown nguyên văn  tích, soạn thảo, tổng hợp;    hỗ trợ          sạch, kiểm duyệt   giám sát /monitor
+ rerank            Git + PostgreSQL FTS giám định dữ liệu (định kỳ)                   2 cấp cho Luồng B   (telemetry Redis)
+                                        summary-svc (API tổng hợp cũ, dùng chung lõi services/summary/core.py)
      │                  │                     │                                         │
   Qdrant           kho Git /kb           PostgreSQL · Redis (hàng đợi Celery)       docling-serve (PDF/OCR)
      │
@@ -35,7 +36,7 @@ Trình duyệt ──HTTPS──> Nginx (biên, TLS) ──> portal (Vue 3)
 | MarkItDown | Mã nguồn mở (MIT, Microsoft) | Chuyển DOCX/XLSX/PPTX/HTML sang Markdown |
 | Keycloak | Mã nguồn mở (Apache 2.0) | SSO, vai trò, nhóm đơn vị, MFA |
 | PostgreSQL, Redis, Nginx, Gitea, Prometheus | Mã nguồn mở | Dữ liệu, hàng đợi, biên, kho Git, giám sát |
-| `backend/` (Python, FastAPI) | Viết mới | 8 dịch vụ nghiệp vụ, harness, verifier |
+| `backend/` (Python, FastAPI) | Viết mới | 9 dịch vụ nghiệp vụ, harness, verifier, tác vụ dài (agent), giám định dữ liệu, giám sát |
 | `frontend/` (Vue 3) | Viết mới | Cổng nghiệp vụ và quản trị |
 
 ### Hai luồng tri thức
@@ -75,20 +76,24 @@ backend/
     summary/           tổng hợp Map → tính bằng mã → Reduce → Verifier → DOCX
     support/           cây xử lý sự cố, phiếu yêu cầu, đề xuất bổ sung tri thức
     audit/             nhật ký kiểm toán chuỗi băm, kiểm tra toàn vẹn
-  tools/               seed.py (nạp dữ liệu ban đầu), reindex.py (lập chỉ mục lại)
+  tools/               seed.py (nạp dữ liệu ban đầu), import_archive.py (nạp kho văn bản đã ban hành), reindex.py (lập chỉ mục lại)
   tests/               kiểm thử đơn vị, tích hợp end-to-end, máy chủ mô hình giả lập
 frontend/              Vue 3: Hỏi đáp, Tra cứu chính xác, Tổng hợp, Hỗ trợ kỹ thuật, Danh mục, Nạp dữ liệu, Kiểm duyệt, Quản trị
 prompts/ skills/ glossary/ support/   tài nguyên Markdown/YAML tùy biến
 docs/                  đánh giá kỹ thuật (docs/danh-gia-fts.md: SQLite FTS5 – PostgreSQL)
 kb-seed/               dữ liệu mẫu (van-ban/ → Luồng B, tai-lieu/ → Luồng A)
+kb-nganh/              văn bản ngành: Luật Cơ yếu 2011, Luật An ninh mạng 2025 (Luồng B) – nạp: tools.seed ../kb-nganh
 config/                nginx, keycloak (realm), litellm, postgres, prometheus, tài khoản thử nghiệm
-scripts/               init, gen-certs, download-models, export-bundle, import-bundle, backup, smoke-test
+scripts/               init, gen-certs, download-models, export-bundle, import-bundle, backup, smoke-test,
+                       download-docker-debs, install-docker-offline, prepare-host (máy chủ không Internet), upgrade (nâng cấp), lib-env
 docker-compose.yml     triển khai Giai đoạn 1 (CPU) · docker-compose.gpu.yml: bổ sung vLLM
 ```
 
 ---
 
 ## 3. Triển khai trên mạng nội bộ
+
+> **Máy chủ Ubuntu không kết nối Internet** – tải, đóng gói (laptop Windows + WSL + VS Code), chuyển giao, triển khai lần đầu, **nâng cấp** (`scripts/upgrade.sh`), quay lại bản cũ, khôi phục dữ liệu, ý nghĩa từng script: xem **`docs/trien-khai-ubuntu-offline.md`**.
 
 ### 3.1. Yêu cầu
 
@@ -100,9 +105,9 @@ docker-compose.yml     triển khai Giai đoạn 1 (CPU) · docker-compose.gpu.y
 
 ```bash
 # 1) Mô hình (tự lượng tử hóa từ bản gốc – khuyến nghị; hoặc MODE=gguf để tải GGUF dựng sẵn)
-CAP=2 MODE=quantize scripts/download-models.sh ./out-models
-# 2) Ảnh container, gói Python, mã nguồn; ký số SHA256SUMS bằng chứng thư của cán bộ phụ trách
-scripts/export-bundle.sh ./bundle canbo.crt canbo.key
+CAP=2 MODE=quantize scripts/download-models.sh ./out-models   # máy chủ CPU 20 nhân: CAP=2 MODE=gguf WITH_SMALL=0 (VS Code: tác vụ T0–T4)
+# 2) Ảnh container, gói Python, mã nguồn, bộ cài Docker cho Ubuntu đích (noble/jammy); ký số SHA256SUMS
+UBUNTU_CODENAME=noble scripts/export-bundle.sh ./bundle canbo.crt canbo.key
 ```
 
 Chuyển `bundle/` và `out-models/gguf/` vào mạng nội bộ qua phương tiện được cấp phép theo quy trình chuyển giao.
@@ -111,11 +116,16 @@ Chuyển `bundle/` và `out-models/gguf/` vào mạng nội bộ qua phương ti
 
 ```bash
 tar xzf bundle/source/ai-local.tar.gz -C /opt/ai-local && cd /opt/ai-local
+scripts/prepare-host.sh                                            # kiểm tra phần cứng, phần mềm
+sudo scripts/install-docker-offline.sh /duong-dan/bundle/docker-debs/noble   # nếu máy chủ chưa có Docker
+sudo scripts/prepare-host.sh --ap-dung                             # tắt ngủ, cập nhật tự động; tham số nhân hệ điều hành
 scripts/import-bundle.sh /duong-dan/bundle ca-noibo.crt /duong-dan/out-models/gguf   # xác thực chữ ký, băm; nạp ảnh; chép mô hình
-cp .env.example .env && vi .env      # AI_HOST, AI_PUBLIC_URL, tên tệp mô hình, số luồng CPU, SYSTEM_MAX_CLEARANCE
+cp .env.example .env && scripts/prepare-host.sh --env .env && vi .env   # tham số CPU/RAM tự tính; sửa AI_HOST, AI_PUBLIC_URL, SYSTEM_MAX_CLEARANCE
 scripts/init.sh                      # sinh khóa bí mật, chứng thư (nếu chưa có), kiểm tra mô hình, khởi động, chờ sẵn sàng
 scripts/smoke-test.sh                # kiểm tra mô hình, embedding
 docker compose --profile tools run --rm tools   # (tùy chọn) nạp dữ liệu mẫu trong kb-seed/
+docker compose --profile tools run --rm tools python -m tools.seed /kb-nganh   # nạp Luật Cơ yếu, Luật An ninh mạng 2025
+docker compose --profile tools run --rm -v /du-lieu/van-ban-di:/van-ban-di:ro tools python -m tools.import_archive /van-ban-di   # kho văn bản đã ban hành
 ```
 
 - Đăng nhập lần đầu: tài khoản `quantri`, mật khẩu tạm `KC_INIT_ADMIN_PASSWORD` trong `.env` (bắt buộc đổi mật khẩu và cài OTP).
@@ -217,6 +227,14 @@ Tài liệu OpenAPI: `https://<AI_HOST>/api/docs` (gateway); mỗi dịch vụ c
 
 ## 7. Giới hạn đã biết
 
+- Bản 1.3.1 – sửa lỗi kiểm duyệt tài liệu dài: lập chỉ mục và ghi kho văn bản chuẩn chuyển sang tiến trình nền (trạng thái mới "Đang ghi vào kho", trang kiểm duyệt tự cập nhật, lỗi trả tác vụ về trạng thái chờ duyệt kèm nguyên nhân); thời gian chờ lập chỉ mục 3600 giây; lọc thông báo nhiễu `WinError 10054 … _call_connection_lost` của asyncio trên Windows; `tools.seed` chờ duyệt xong.
+- Bản 1.3.2 – **thay thế** toàn bộ nội dung bộ kỹ năng theo Luật Cơ yếu 2011 và Luật An ninh mạng 2025 (`docs/bo-ky-nang-nganh-co-yeu.md`): viết lại 10 kỹ năng cũ (bộ tiêu chí ngành đổi tên `phan-tich-co-yeu`, 20 tiêu chí có căn cứ điều, khoản; bộ tiêu chí rút gọn; 4 mẫu soạn thảo – mẫu báo cáo gộp báo cáo sự cố và tự kiểm tra an ninh mạng, mẫu công văn gộp đề nghị triển khai sản phẩm mật mã; 4 mẫu tổng hợp), không thêm mẫu mới; bối cảnh ngành dùng chung `nganh-co-yeu`; chương trình tự phát hiện căn cứ hết hiệu lực; nhận diện số hiệu luật, loại "Luật", "Pháp lệnh"; tra nguyên văn theo tên luật; hai luật dạng Markdown trong `kb-nganh/`.
+- Bản 1.4.0 – (1) **Kho văn bản đã ban hành** (`docs/kho-van-ban-va-tham-gia-y-kien.md`): nhóm tài liệu `van_ban_di`; `tools.import_archive` nạp hàng loạt (kể cả `.doc` cũ qua LibreOffice, `INSTALL_LIBREOFFICE=1`); văn bản đã ban hành làm tiền lệ (cách viết, quan điểm – không phải căn cứ) khi soạn văn bản, tham gia ý kiến; nút "Đưa vào kho văn bản đã ban hành". (2) **Tác vụ tham gia ý kiến dự thảo** (`gop_y`): công văn theo kết cấu Căn cứ → Nội dung tham gia ý kiến → Đề xuất, kiến nghị, kèm phụ lục bảng đề xuất chỉnh sửa; rà soát thuật ngữ (danh mục ngành, đối chiếu định nghĩa với kho văn bản chuẩn), căn cứ pháp lý (hết hiệu lực, thiếu căn cứ bắt buộc) bằng chương trình; nhiệm vụ của ngành, kỹ thuật bảo mật – ký số – xác thực bằng mô hình kèm điều luật tra được; màn hình duyệt từng ý kiến; định tuyến từ trò chuyện khi đính kèm dự thảo.
+- Bản 1.4.1 – Tích hợp **tham gia ý kiến dự thảo** vào phân hệ **Soạn văn bản tham mưu**, là hình thức của loại văn bản **Công văn** (hình thức: "Trả lời, đề nghị" / "Tham gia ý kiến dự thảo", khai báo bằng `che_do` trong mẫu); bỏ tiện ích riêng; tự chọn hình thức khi Công văn có tệp đính kèm và chủ đề "tham gia ý kiến"; tiêu đề tác vụ theo tên dự thảo; `kind: "gop_y"` và đường dẫn cũ được chuyển tự động.
+- Bản 1.4.2 – Triển khai trên **máy chủ Ubuntu không kết nối Internet** (`docs/trien-khai-ubuntu-offline.md`): `download-docker-debs.sh` / `install-docker-offline.sh` (cài Docker Engine + Compose từ gói .deb, không hạ cấp gói hệ điều hành); `prepare-host.sh` (kiểm tra phần cứng, tinh chỉnh Ubuntu Desktop: tắt ngủ, cập nhật tự động, sysctl, CPU hiệu năng; tính tham số luồng/ngữ cảnh theo số nhân vật lý, RAM, NUMA và ghi vào `.env`); `export-bundle.sh` kèm bộ cài Docker (`UBUNTU_CODENAME`) và LibreOffice mặc định; `smoke-test.sh` đo tốc độ xử lý ngữ cảnh, sinh văn bản. Sửa lỗi: `.env` có giá trị chứa dấu cách (`LLM_MAIN_EXTRA`) làm `init.sh` dừng – các script nạp `.env` theo cú pháp Compose (`scripts/lib-env.sh`), không thực thi tệp.
+- Bản 1.4.3 – Tác vụ VS Code T0–T4 (chuẩn bị công cụ, tải mô hình, tải bộ cài Docker, đóng gói, kiểm tra băm; chạy trên Linux hoặc Windows qua WSL); bảng câu lệnh trong `docs/trien-khai-ubuntu-offline.md` mục 1.1. Sửa lỗi: `download-models.sh` chế độ `MODE=gguf` tải embedding bge-m3 gốc với tên tệp không khớp `.env` – nay chuyển đổi Vietnamese_Embedding sang `vietnamese-embedding-f16.gguf`; thêm `WITH_SMALL=0`; gói mã nguồn loại trừ `out-models/`, `llama.cpp/`, `.venv-tai/`.
+- Bản 1.4.4 – Tài liệu triển khai viết lại theo 4 giai đoạn (tải – đóng gói – chuyển giao – triển khai), bảng ý nghĩa từng script, quy trình nâng cấp, quay lại bản cũ, khôi phục dữ liệu. `scripts/upgrade.sh`: kiểm tra gói, sao lưu, lưu bản mã nguồn cũ, cập nhật mã nguồn giữ nguyên `.env`/chứng thư/mô hình, bổ sung tham số mới, chuyển thẻ ảnh, khởi động lại, kiểm tra. Sửa lỗi: `export-bundle.sh` gắn thẻ ảnh theo `.env` cũ của máy tải khi đóng gói lần sau (nay lấy theo `.env.example`); gói mã nguồn có thể kèm chứng thư, khóa của máy tải (nay loại trừ). Tác vụ VS Code T0 dùng Python 3.12 (`uv`). Sửa lỗi gói mã nguồn cũ: `export-bundle.sh` trước đây dùng `git archive HEAD` nên chỉ lấy commit cuối, bỏ sót các thay đổi chưa commit; nay đóng gói cây thư mục làm việc, chặn cứng `documents/`, `.env*`, khóa, mô hình và tự kiểm tra gói có `upgrade.sh`, `prepare-host.sh`, đúng phiên bản ảnh.
+- Bản 1.3.0 – tác vụ AI, hỏi lại, bảo vệ ATTT, giám định dữ liệu, giám sát (`docs/tac-vu-ai-va-giam-sat.md`): dịch vụ mới **agent-svc** + **agent-worker** chạy tác vụ dài theo kế hoạch từng bước, có tiến trình trực quan, hủy/chạy lại, nhường máy chủ mô hình cho hỏi đáp trực tiếp: **phân tích văn bản mới** (tóm tắt; trích thời hạn, nhiệm vụ, văn bản viện dẫn bằng chương trình; đối chiếu cơ sở tri thức; áp **bộ tiêu chí ngành bảo mật thông tin, cơ yếu, chứng thực số**; báo cáo có trích dẫn đã kiểm chứng), **soạn văn bản tham mưu** (tờ trình, báo cáo đề xuất, kế hoạch, công văn góp ý; duyệt dàn ý trước khi viết; bản sạch và bản kèm căn cứ; DOCX), **tổng hợp báo cáo chung** từ báo cáo trong kho và tệp tải lên; đính kèm tệp ngay trong trò chuyện. Mọi câu trả lời hiển thị **kế hoạch các bước** trực tiếp. **Hỗ trợ kỹ thuật gộp vào hỏi đáp chung**: bỏ cây xử lý soạn tay, các bước xử lý trích tự động từ tài liệu kỹ thuật, tạo phiếu ngay từ câu trả lời. **Hỏi lại làm rõ** khi câu hỏi chưa rõ thiết bị, triệu chứng hoặc kết quả tìm kiếm phân tán. **Bảo vệ ATTT**: chặn và không lưu mã PIN, mật khẩu, khóa bí mật; chặn yêu cầu vượt bảo mật, nội dung mang dấu độ mật vượt cấp; chỉ thị nghiệp vụ ngành. **Tác tử giám định dữ liệu** chạy định kỳ khi hệ thống rảnh (gần trùng, mâu thuẫn số liệu, hiệu lực, viện dẫn thiếu, lỗ hổng tri thức…; tầng kiểm tra chéo bằng mô hình bật khi tài nguyên cho phép). **Giám sát hệ thống**: chỉ số, biểu đồ, người dùng, hiệu năng mô hình, tài nguyên, nhật ký hệ thống tập trung xem trực tiếp, kiểm toán. `tools.seed` chỉ nạp tài liệu mẫu còn thiếu (chạy lại `--seed` để có tài liệu hướng dẫn kỹ thuật mẫu mới).
 - Bản 1.2.0 – truy xuất, chất lượng câu trả lời (Luồng A): tìm kiếm khớp cả khi gõ không dấu, mở rộng chữ viết tắt theo từ điển thuật ngữ; gộp đoạn cùng mục và đưa nguyên mục (hoặc đoạn lân cận) cho mô hình; bảng dài giữ dòng tiêu đề ở mọi đoạn; giới hạn số mục mỗi tài liệu; ngưỡng reranker tương đối; câu hỏi nhắc lại sau nguồn; phát hiện câu trả lời bị cắt do hết token; Verifier kiểm tra bám nguồn từng câu (tự sửa trích dẫn lệch, bổ sung trích dẫn thiếu, đánh dấu câu không có trong nguồn). Tham số và cách tinh chỉnh: `docs/tinh-chinh-truy-xuat.md`; chẩn đoán: `python -m tools.search_debug "<câu hỏi>"`. Dữ liệu đã nạp trước 1.2.0 cần lập chỉ mục lại (`run_stack.py --real --reindex` hoặc `tools.reindex`).
 
 - Bản 1.1.6 – giao diện: trò chuyện là màn hình chính; các phân hệ là tiện ích mở rộng (trang `/tien-ich`, người dùng tự ghim lên thanh bên; lệnh nhanh `/` trong ô nhập); cây xử lý sự cố chạy ngay trong trò chuyện; nguồn và toàn văn mở ở ngăn bên phải; chế độ sáng/tối; logo đơn vị tại `frontend/public/logo.png` (thay tệp để đổi logo). Danh mục tiện ích, chế độ trả lời và câu hỏi gợi ý khai báo tại `frontend/src/extensions.js`.

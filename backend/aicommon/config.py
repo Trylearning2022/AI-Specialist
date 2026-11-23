@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     docling_ocr_engine: str = "easyocr"
     docling_ocr_lang: str = "vi,en"
     docling_timeout: float = 900.0
+    office_convert_timeout: int = 180   # giây – chuyển .doc/.xls bằng LibreOffice
 
     # ------------------------------------------------------------------ Tách đoạn (Luồng A) – thay đổi cần lập chỉ mục lại
     # [TINH CHỈNH] Kích thước đoạn tối đa (token ước lượng = số ký tự / 3). Nhỏ → khớp chính xác hơn nhưng
@@ -132,6 +133,59 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ Hỗ trợ kỹ thuật
     support_dir: str = "/app/support"
     ticket_webhook_url: str | None = None
+
+    # ------------------------------------------------------------------ Hồ sơ phần cứng (1.3.0)
+    # cpu | gpu. Ảnh hưởng tới mặc định của các chức năng nặng (kiểm tra chéo bằng mô hình, số bước tác tử).
+    hardware_profile: str = "cpu"
+
+    # ------------------------------------------------------------------ Hỏi lại làm rõ (1.3.0)
+    # [TINH CHỈNH] Bật hỏi lại khi câu hỏi chưa đủ thông tin (thuật toán heuristic, không tốn mô hình).
+    clarify_enabled: bool = True
+    # Câu hỏi có ít hơn N âm tiết nội dung (sau khi bỏ từ dừng) được coi là quá ngắn để tìm kiếm.
+    clarify_min_tokens: int = 3
+    # [TINH CHỈNH] Hỏi lại khi kết quả tìm kiếm phân tán: điểm rerank cao nhất dưới ngưỡng này VÀ
+    # ≥ 3 tài liệu khác nhau có điểm sát nhau (chênh ≤ clarify_spread). Đặt rất thấp (-99) để tắt.
+    clarify_max_score: float = 0.0
+    clarify_spread: float = 1.5
+    # Dùng mô hình nhỏ đánh giá câu hỏi mơ hồ (tốn thêm 1 lượt gọi mô hình; mặc định chỉ bật trên GPU).
+    clarify_llm: bool = False
+
+    # ------------------------------------------------------------------ An toàn thông tin (1.3.0)
+    # Chặn câu hỏi chứa bí mật (khóa bí mật PEM, mã PIN, mật khẩu) và yêu cầu vượt qua cơ chế bảo mật.
+    guard_enabled: bool = True
+
+    # ------------------------------------------------------------------ Tác vụ dài – agent (1.3.0)
+    agent_url: str = "http://agent:8000"
+    # [TINH CHỈNH] Tác vụ nền nhường mô hình cho hỏi đáp trực tiếp: trước mỗi lượt gọi mô hình, chờ tối đa
+    # N giây khi đang có người hỏi đáp (0 = không nhường). CPU: 120–300; GPU: 0–30.
+    agent_yield_max_s: int = 180
+    # Ngân sách token mỗi phần tài liệu khi phân tích (map). CPU: 2500–3500; GPU: 5000–8000.
+    agent_part_tokens: int = 3000
+    # Số tiêu chí tối đa áp dụng trong một lượt phân tích (giới hạn thời gian chạy trên CPU).
+    agent_max_criteria: int = 20
+    agent_precedents: int = 2          # số văn bản đơn vị đã ban hành (tiền lệ) đưa vào khi soạn, góp ý
+    agent_gopy_max_passages: int = 8   # tham gia ý kiến: số đoạn tối đa mỗi khía cạnh gửi mô hình (CPU)
+    agent_gopy_def_similarity: float = 0.5  # định nghĩa dự thảo giống định nghĩa luật dưới ngưỡng này → đề nghị thống nhất
+    # Ngân sách token căn cứ cho mỗi phần khi soạn thảo.
+    agent_draft_ctx: int = 2500
+    agent_upload_ttl_h: int = 72  # tệp đính kèm tạm (phân tích) tự xóa sau N giờ
+
+    # ------------------------------------------------------------------ Tác tử giám định dữ liệu (1.3.0)
+    # Chu kỳ tự chạy (phút); 0 = chỉ chạy khi quản trị viên bấm.
+    qa_interval_min: int = 120
+    # Chế độ dùng mô hình để kiểm tra chéo nghi vấn mâu thuẫn: off | auto | on.
+    # auto = chỉ khi HARDWARE_PROFILE=gpu hoặc trong khung giờ rảnh qa_llm_hours (ví dụ "22-6").
+    qa_llm_mode: str = "auto"
+    qa_llm_hours: str = "22-6"
+    qa_llm_max_checks: int = 10  # số nghi vấn tối đa kiểm tra bằng mô hình mỗi lượt
+    qa_dup_threshold: float = 0.85  # ngưỡng Jaccard (MinHash) coi là gần trùng
+    qa_stale_months: int = 18  # báo cáo, kế hoạch cũ hơn N tháng → đề nghị rà soát
+    qa_gap_days: int = 30  # cửa sổ thống kê câu hỏi chưa trả lời được
+
+    # ------------------------------------------------------------------ Giám sát (1.3.0)
+    telemetry_enabled: bool = True
+    telemetry_keep: int = 50000  # số bản ghi giữ lại cho mỗi luồng số liệu
+    logs_keep: int = 20000       # số dòng nhật ký hệ thống giữ lại (mức WARNING trở lên + sự kiện nghiệp vụ)
 
 
 @lru_cache

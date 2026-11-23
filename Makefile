@@ -1,5 +1,5 @@
 # Lệnh thường dùng (chạy tại thư mục gốc)
-.PHONY: init up down logs build seed smoke backup test-local test-stop ui-dev
+.PHONY: init up down logs build seed smoke backup upgrade test-local test-stop ui-dev
 
 init:        ## Khởi tạo lần đầu (sinh khóa, chứng thư, khởi động)
 	scripts/init.sh
@@ -17,6 +17,8 @@ smoke:
 	scripts/smoke-test.sh
 backup:
 	scripts/backup.sh
+upgrade:     ## Nâng cấp: make upgrade B=~/chuyen-giao/bundle
+	scripts/upgrade.sh $(B)
 test-local:  ## Kiểm thử tích hợp không cần Docker (PostgreSQL, Redis cục bộ; mô hình giả lập)
 	cd backend && tests/run_stack.sh && python -m pytest -q tests
 test-stop:

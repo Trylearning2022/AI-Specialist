@@ -2,7 +2,7 @@
 # Sao lưu: CSDL PostgreSQL, snapshot Qdrant, kho văn bản chuẩn (Git), dữ liệu tài liệu. Đặt lịch bằng cron.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
+. scripts/lib-env.sh; load_env .env
 D=${1:-./backups}/$(date +%Y%m%d-%H%M%S); mkdir -p "$D"
 docker compose exec -T postgres pg_dumpall -U ai | gzip > "$D/postgres.sql.gz"
 docker compose exec -T search python - <<PY > "$D/qdrant-snapshot.txt"

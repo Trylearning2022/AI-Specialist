@@ -152,8 +152,18 @@ class KB:
         cands = list(self.docs.values())
         by_so_hieu = [d for d in cands if d.meta.get("so_hieu")
                       and unaccent(str(d.meta["so_hieu"])).lower() in q]
-        if by_so_hieu:
-            cands = by_so_hieu
+        # Luật, pháp lệnh thường được gọi theo TÊN ("Điều 22 Luật Cơ yếu") thay vì số hiệu:
+        # khớp tên văn bản (không dấu) xuất hiện trong câu hỏi, lấy tên dài nhất để tránh nhầm tên ngắn hơn.
+        by_ten = []
+        if not by_so_hieu:
+            named = [(len(t), d) for d in cands
+                     if (t := unaccent(nfc(str(d.meta.get("ten") or ""))).lower().strip()) and len(t) >= 6
+                     and re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", q)]
+            if named:
+                best = max(n for n, _ in named)
+                by_ten = [d for n, d in named if n == best]
+        if by_so_hieu or by_ten:
+            cands = by_so_hieu or by_ten
         elif len(cands) > 1:
             return []
         if doc_ids is not None:

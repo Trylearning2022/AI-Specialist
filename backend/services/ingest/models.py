@@ -6,9 +6,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from aicommon.db import Base, utcnow
 
-# Trạng thái tác vụ nạp
-MOI, DANG_XU_LY, CHO_DUYET, CHO_DUYET_CAP_2, DA_DUYET, TU_CHOI, LOI = (
-    "moi", "dang_xu_ly", "cho_duyet", "cho_duyet_cap_2", "da_duyet", "tu_choi", "loi")
+# Trạng thái tác vụ nạp. DANG_DUYET: đã bấm duyệt, tiến trình nền đang lập chỉ mục / ghi kho chuẩn (1.3.1).
+MOI, DANG_XU_LY, CHO_DUYET, CHO_DUYET_CAP_2, DANG_DUYET, DA_DUYET, TU_CHOI, LOI = (
+    "moi", "dang_xu_ly", "cho_duyet", "cho_duyet_cap_2", "dang_duyet", "da_duyet", "tu_choi", "loi")
 
 
 class Job(Base):

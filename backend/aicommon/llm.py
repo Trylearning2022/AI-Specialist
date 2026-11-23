@@ -5,11 +5,13 @@
 """
 import json
 import re
+import time
 from typing import Any, AsyncIterator
 
 import httpx
 
 from .config import get_settings
+from .telemetry import llm_usage, record_llm
 
 THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
 
@@ -62,6 +64,10 @@ def _body(messages, model, temperature, max_tokens, schema=None, tools=None, str
     return body
 
 
+def _chars(messages) -> int:
+    return sum(len(str(m.get("content") or "")) for m in messages)
+
+
 def _headers(task: str | None):
     h = {"Authorization": f"Bearer {get_settings().llm_api_key}"}
     if task:
@@ -78,13 +84,22 @@ class AsyncLLM:
     async def chat_raw(self, messages, model=None, temperature=0.2, max_tokens=1024,
                        schema=None, tools=None, task=None, **extra) -> dict:
         body = _body(messages, model, temperature, max_tokens, schema, tools, **extra)
+        t0 = time.perf_counter()
         try:
             r = await self.client.post(f"{self.base}/chat/completions", json=body, headers=_headers(task))
         except httpx.HTTPError as e:
+            record_llm(task, body["model"], t0, False, error=str(e))
             raise LLMError(f"Không kết nối được máy chủ mô hình: {e}") from e
         if r.status_code >= 400:
+            record_llm(task, body["model"], t0, False, error=f"HTTP {r.status_code}")
             raise LLMError(f"Máy chủ mô hình trả lỗi {r.status_code}: {r.text[:300]}")
-        return r.json()
+        data = r.json()
+        try:
+            out = data["choices"][0]["message"].get("content") or ""
+        except (KeyError, IndexError):
+            out = ""
+        record_llm(task, body["model"], t0, True, *llm_usage(data, _chars(messages), out))
+        return data
 
     async def chat(self, messages, **kw) -> str:
         data = await self.chat_raw(messages, **kw)
@@ -100,7 +115,9 @@ class AsyncLLM:
         """Sinh câu trả lời theo luồng. Nếu truyền dict `info`, sau khi kết thúc sẽ có
         info["finish_reason"]: "stop" (mô hình tự dừng) | "length" (hết max_tokens – câu trả lời bị cắt)."""
         body = _body(messages, model, temperature, max_tokens, stream=True, **extra)
+        body["stream_options"] = {"include_usage": True}  # máy chủ hỗ trợ sẽ trả số token ở gói cuối
         in_think = False
+        t0, first, out_chars, usage = time.perf_counter(), None, 0, {}
         try:
             async with self.client.stream("POST", f"{self.base}/chat/completions", json=body,
                                           headers=_headers(task)) as r:
@@ -113,7 +130,12 @@ class AsyncLLM:
                     if data == "[DONE]":
                         break
                     try:
-                        choice = json.loads(data)["choices"][0]
+                        obj = json.loads(data)
+                        if obj.get("usage"):
+                            usage = obj["usage"]
+                        if not obj.get("choices"):
+                            continue
+                        choice = obj["choices"][0]
                         delta = choice.get("delta", {}).get("content") or ""
                         if choice.get("finish_reason") and info is not None:
                             info["finish_reason"] = choice["finish_reason"]
@@ -130,9 +152,15 @@ class AsyncLLM:
                         else:
                             continue
                     if delta:
+                        if first is None:
+                            first = time.perf_counter() - t0
+                        out_chars += len(delta)
                         yield delta
         except httpx.HTTPError as e:
+            record_llm(task, body["model"], t0, False, error=str(e))
             raise LLMError(f"Mất kết nối máy chủ mô hình: {e}") from e
+        tin, tout = llm_usage({"usage": usage}, _chars(messages), "x" * out_chars)
+        record_llm(task, body["model"], t0, True, tin, tout, first_token_s=first)
 
     async def models(self) -> list[str]:
         r = await self.client.get(f"{self.base}/models", headers=_headers(None))
@@ -153,13 +181,19 @@ class SyncLLM:
 
     def chat(self, messages, model=None, temperature=0.2, max_tokens=1024, schema=None, task=None, **extra) -> str:
         body = _body(messages, model, temperature, max_tokens, schema, **extra)
+        t0 = time.perf_counter()
         try:
             r = self.client.post(f"{self.base}/chat/completions", json=body, headers=_headers(task))
         except httpx.HTTPError as e:
+            record_llm(task, body["model"], t0, False, error=str(e))
             raise LLMError(f"Không kết nối được máy chủ mô hình: {e}") from e
         if r.status_code >= 400:
+            record_llm(task, body["model"], t0, False, error=f"HTTP {r.status_code}")
             raise LLMError(f"Máy chủ mô hình trả lỗi {r.status_code}: {r.text[:300]}")
-        return strip_think(r.json()["choices"][0]["message"].get("content") or "")
+        data = r.json()
+        out = data["choices"][0]["message"].get("content") or ""
+        record_llm(task, body["model"], t0, True, *llm_usage(data, _chars(messages), out))
+        return strip_think(out)
 
     def chat_json(self, messages, schema: dict, **kw) -> Any:
         kw.setdefault("temperature", 0.0)

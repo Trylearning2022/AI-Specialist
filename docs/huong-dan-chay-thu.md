@@ -460,11 +460,15 @@ Sau khi bước 4 đạt (dữ liệu mẫu đã được nạp), thực hiện 
 | 2 | Tra cứu chính xác (`canbo`) | Gõ `QD-15-2026.D5` hoặc `thoi han su dung` (không dấu) | Hiện Điều 5 "Thời hạn sử dụng" kèm mã mục; nội dung trùng văn bản gốc trong `kb-seed/van-ban` |
 | 3 | Hỏi đáp (`canbo`) | Hỏi: "Theo QD-15-2026, thời hạn sử dụng USB Token là bao lâu?" | Câu trả lời hiện dần từng đoạn, có trích dẫn mã mục; bấm trích dẫn xem được nguyên văn |
 | 4 | Hỏi đáp (`canbo`) | Hỏi một câu về nội dung báo cáo tuần hoặc sự cố mất mạng | Câu trả lời theo Luồng A, có danh sách nguồn tài liệu |
-| 5 | Hỗ trợ kỹ thuật (`canbo`) | Chọn cây "máy in" hoặc "USB Token", trả lời từng câu hỏi | Hệ thống dẫn qua từng bước xử lý; ở bước cuối tạo được phiếu yêu cầu nếu chưa khắc phục |
-| 6 | Tổng hợp (`canbo`) | Chọn mẫu "Tổng hợp báo cáo tuần", chọn 2 báo cáo tuần mẫu, chạy | Công việc chuyển sang trạng thái hoàn thành; số liệu cộng do mã tính; tải được DOCX nếu có pandoc |
+| 5 | Hỗ trợ kỹ thuật (`canbo`) | Hỏi "USB Token cắm vào máy tính không nhận, đèn không sáng"; sau đó hỏi "bị lỗi rồi" | Câu thứ nhất: kế hoạch 5 bước hiện trực tiếp, các bước xử lý lấy từ tài liệu hướng dẫn, có nút tạo phiếu hỗ trợ. Câu thứ hai: thẻ hỏi lại thiết bị, bấm một lựa chọn thì trả lời tiếp |
+| 6 | Tổng hợp (`canbo`) | Kéo 2 tệp báo cáo vào ô trò chuyện, gõ "tổng hợp báo cáo chung", gửi | Thẻ tác vụ hiện tiến trình từng bước; xong mở "Xem kết quả": báo cáo, bảng số liệu do chương trình tính, xuất DOCX |
+| 6a | Phân tích văn bản (`canbo`) | Đính kèm một văn bản (kế hoạch, công văn) vào ô trò chuyện, gửi | Thẻ tác vụ phân tích 7 bước; kết quả có tóm tắt, vấn đề theo tiêu chí ngành, nhiệm vụ – thời hạn, đối chiếu văn bản viện dẫn |
+| 6b | Soạn thảo (`canbo`) | Gõ "Soạn tờ trình về việc cấp bổ sung thiết bị lưu khóa bí mật" | Tác vụ dừng ở "Chờ xác nhận": sửa dàn ý, gắn căn cứ, xác nhận; nhận bản sạch và bản kèm căn cứ |
+| 6c | Bảo vệ ATTT (`canbo`) | Gõ "mã PIN của tôi là 12345678" | Bị chặn, hiện hướng dẫn; mở lại hội thoại không thấy giá trị PIN |
+| 6d | Giám định dữ liệu, Giám sát (`kiemduyet1`, `quantri`) | Bấm "Giám định ngay"; mở Giám sát hệ thống | Lượt giám định chạy từng bước, danh sách phát hiện; trang giám sát có chỉ số, biểu đồ, nhật ký hệ thống |
 | 7 | Nạp dữ liệu (`kiemduyet1`) | Tải lên một tệp DOCX hoặc Markdown, chọn Luồng B | Tệp được chuyển sang Markdown, có điểm chất lượng; chờ duyệt |
 | 8 | Kiểm duyệt (`kiemduyet1`, rồi `kiemduyet2`) | Duyệt cấp 1 bằng `kiemduyet1`, đăng xuất, duyệt cấp 2 bằng `kiemduyet2` | Chỉ sau khi hai người khác nhau duyệt, văn bản mới vào kho văn bản chuẩn; một người duyệt cả hai cấp bị từ chối |
-| 9 | Quản trị (`quantri`) | Mở trang, xem nhật ký kiểm toán và bấm kiểm tra chuỗi băm | Các thao tác ở kịch bản 1–8 có trong nhật ký; chuỗi băm báo toàn vẹn |
+| 9 | Giám sát hệ thống › Kiểm toán (`quantri`) | Xem nhật ký kiểm toán và bấm kiểm tra chuỗi băm | Các thao tác ở kịch bản 1–8 có trong nhật ký; chuỗi băm báo toàn vẹn |
 | 10 | Trang quản trị (`canbo`) | Gõ trực tiếp `/quan-tri` trên thanh địa chỉ | Bị chuyển về trang Hỏi đáp (không có quyền) |
 
 **Kiểm tra qua API bằng dòng lệnh.** Danh sách API xem tại `http://localhost:8100/api/docs`. Mọi yêu cầu gửi kèm token thử nghiệm dạng `dev-<tên tài khoản>`. Kết quả dưới đây lấy từ lần chạy thử thực tế.

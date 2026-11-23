@@ -16,6 +16,9 @@
       <div v-if="job.approvals?.length" class="muted" style="margin-top:.4rem">Đã duyệt:
         <span v-for="a in job.approvals" :key="a.at">{{ a.user }} (Luồng {{ a.track }}, {{ fmtDate(a.at) }}) </span></div>
       <p v-if="job.reject_reason" class="err">Lý do từ chối: {{ job.reject_reason }}</p>
+      <p v-if="job.status === 'dang_duyet'" class="note"><span class="spin sm" /> Đang lập chỉ mục{{ job.target === 'B' ? ' và ghi vào kho văn bản chuẩn' : '' }}
+        – tài liệu dài trên máy chủ CPU có thể mất vài phút. Có thể rời trang, tiến trình vẫn chạy nền.</p>
+      <p v-if="job.error && job.status !== 'loi'" class="err">{{ job.error }}</p>
     </div>
     <div class="card">
       <h3>Thông tin mô tả</h3>
@@ -55,7 +58,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
 import { render, DO_MAT, LOAI, STATUS, fmtDate } from '../md'
@@ -67,7 +70,7 @@ const route = useRoute()
 const job = ref(null), md = ref(''), meta = ref({}), donVi = ref(''), msg = ref(''), err = ref(false)
 const editable = computed(() => ['cho_duyet', 'cho_duyet_cap_2'].includes(job.value?.status))
 
-onMounted(load)
+onMounted(async () => { await load(); if (job.value?.status === 'dang_duyet') watchApproval() })
 async function load() {
   job.value = await api.get('/ingest/jobs/' + route.params.id)
   md.value = job.value.markdown
@@ -80,11 +83,27 @@ async function run(fn, ok) {
   try { await fn(); msg.value = ok; await load() } catch (e) { err.value = true; msg.value = e.message }
 }
 const save = () => run(() => api.put('/ingest/jobs/' + job.value.id, { markdown: md.value, meta: metaOut() }), 'Đã lưu.')
+// Duyệt: máy chủ kiểm tra điều kiện rồi chuyển phần lập chỉ mục / ghi kho cho tiến trình nền (trạng thái
+// "dang_duyet"); trang thăm dò mỗi 2 giây tới khi xong hoặc báo lỗi.
+let poll = null
+onBeforeUnmount(() => clearInterval(poll))
+function watchApproval() {
+  clearInterval(poll)
+  poll = setInterval(async () => {
+    const j = await api.get('/ingest/jobs/' + route.params.id).catch(() => null)
+    if (!j || j.status === 'dang_duyet') return
+    clearInterval(poll)
+    await load()
+    if (j.status === 'da_duyet') { err.value = false; msg.value = 'Đã duyệt, lập chỉ mục xong.' + (j.target === 'B' ? ' Văn bản đã ghi vào kho chuẩn.' : '') }
+    else if (j.error) { err.value = true; msg.value = j.error }
+  }, 2000)
+}
 async function approve(track) {
   await run(async () => {
     await api.put('/ingest/jobs/' + job.value.id, { markdown: md.value, meta: metaOut() })
-    await api.post(`/ingest/jobs/${job.value.id}/approve`, { track })
-  }, track === 'A' ? 'Đã duyệt và lập chỉ mục.' : 'Đã ghi nhận duyệt.')
+    const j = await api.post(`/ingest/jobs/${job.value.id}/approve`, { track })
+    if (j.status === 'dang_duyet') watchApproval()
+  }, track === 'B' && job.value.status === 'cho_duyet' ? 'Đã ghi nhận duyệt cấp 1.' : 'Đã tiếp nhận duyệt – đang ghi vào kho…')
 }
 async function reject() {
   const ly_do = await promptBox('Lý do từ chối', { placeholder: 'Nêu rõ lý do để người nạp tài liệu khắc phục…', ok: 'Từ chối' })

@@ -17,4 +17,10 @@ __pycache__/
 .venv/
 .test-run/
 .test-run-that/
-kb-seed/
+.venv-tai/
+llama.cpp/
+out-models/
+# Tài liệu nội bộ, bản sao .env — không đưa vào kho mã/gói mã nguồn
+documents/
+.env.*
+!.env.example

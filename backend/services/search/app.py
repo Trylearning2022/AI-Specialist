@@ -90,7 +90,7 @@ async def ensure_collection():
                                   ("loai", qm.PayloadSchemaType.KEYWORD), ("do_mat", qm.PayloadSchemaType.INTEGER),
                                   ("trang_thai", qm.PayloadSchemaType.KEYWORD), ("nguon", qm.PayloadSchemaType.KEYWORD),
                                   ("ngay_ban_hanh", qm.PayloadSchemaType.KEYWORD),
-                                  ("section_id", qm.PayloadSchemaType.KEYWORD)):
+                                  ("section_id", qm.PayloadSchemaType.KEYWORD), ("nhom", qm.PayloadSchemaType.KEYWORD)):
                 try:
                     await q.create_payload_index(S.qdrant_collection, field, schema)
                 except Exception:  # chế độ local không hỗ trợ chỉ mục payload
@@ -188,6 +188,12 @@ def _acl_filter(user: UserCtx, f: dict | None = None) -> qm.Filter:
         must.append(qm.FieldCondition(key="trang_thai", match=qm.MatchValue(value=f["trang_thai"])))
     if f.get("nguon"):
         must.append(qm.FieldCondition(key="nguon", match=qm.MatchValue(value=f["nguon"])))
+    if f.get("nhom"):  # "van_ban_di": chỉ văn bản đơn vị đã ban hành (tiền lệ tham mưu)
+        nhom = f["nhom"] if isinstance(f["nhom"], list) else [f["nhom"]]
+        must.append(qm.FieldCondition(key="nhom", match=qm.MatchAny(any=nhom)))
+    if f.get("bo_nhom"):  # loại trừ nhóm (ví dụ hỏi đáp thông thường không lấy văn bản đi làm căn cứ)
+        bo = f["bo_nhom"] if isinstance(f["bo_nhom"], list) else [f["bo_nhom"]]
+        return qm.Filter(must=must, must_not=[qm.FieldCondition(key="nhom", match=qm.MatchAny(any=bo))])
     if f.get("tu_ngay") or f.get("den_ngay"):
         must.append(qm.FieldCondition(key="ngay_ban_hanh", range=qm.DatetimeRange(
             gte=f.get("tu_ngay") or None, lte=f.get("den_ngay") or None)))
@@ -211,7 +217,8 @@ async def index(req: IndexReq, user: UserCtx = Depends(require("reviewer", "admi
             "don_vi": don_vi if isinstance(don_vi, list) else [don_vi],
             "loai": m.get("loai", "khac"), "so_hieu": m.get("so_hieu", ""),
             "ngay_ban_hanh": str(m.get("ngay_ban_hanh") or "") or None,
-            "trang_thai": m.get("trang_thai", "con_hieu_luc"), "phien_ban": str(m.get("phien_ban", "1"))}
+            "trang_thai": m.get("trang_thai", "con_hieu_luc"), "phien_ban": str(m.get("phien_ban", "1")),
+            "nhom": m.get("nhom") or "tai_lieu", "co_quan": str(m.get("co_quan_ban_hanh") or "")}
     if base["ngay_ban_hanh"] and len(base["ngay_ban_hanh"]) == 10:
         base["ngay_ban_hanh"] += "T00:00:00Z"
     points = [qm.PointStruct(id=str(uuid.uuid5(NS, f"{req.doc_id}:{c['chunk_no']}")),

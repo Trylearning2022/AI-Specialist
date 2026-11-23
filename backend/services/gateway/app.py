@@ -26,7 +26,8 @@ if S.auth_mode == "dev" and not S.dev_auth_allowed:
 if S.auth_mode == "dev":
     log.warning("ĐANG CHẠY CHẾ ĐỘ ĐĂNG NHẬP THỬ NGHIỆM (AUTH_MODE=dev) – KHÔNG DÙNG CHO VẬN HÀNH")
 ROUTES = {"chat": S.orchestrator_url, "search": S.search_url, "exact": S.exact_url, "ingest": S.ingest_url,
-          "summary": S.summary_url, "support": S.support_url, "audit": S.audit_url}
+          "summary": S.summary_url, "support": S.support_url, "audit": S.audit_url,
+          "agent": S.agent_url}
 HOP = {"host", "content-length", "connection", "keep-alive", "transfer-encoding", "upgrade", "authorization",
        "x-user", "x-user-ts", "x-internal-sig", "x-service", "x-service-ts", "x-service-sig", "cookie"}
 # Chức năng chỉ dành cho gọi nội bộ giữa các dịch vụ: không bao giờ chuyển tiếp từ bên ngoài

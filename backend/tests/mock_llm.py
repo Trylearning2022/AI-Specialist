@@ -94,6 +94,45 @@ def _answer(task: str, msgs: list[dict], body: dict) -> dict | str:
         return {"tieu_de": "Máy in không nhận lệnh in", "noi_dung": "## Triệu chứng\nKhông in được.\n\n## Cách xử lý\n1. Khởi động lại dịch vụ in."}
     if task == "chao-hoi":
         return "Xin chào, tôi là trợ lý AI nội bộ."
+    # ---- 1.3.0: tác vụ dài (agent-svc)
+    if task == "phan-tich-phan":
+        body = user.split("NỘI DUNG:\n", 1)[-1]
+        lines = [ln.strip("-#*0123456789. ").strip() for ln in body.splitlines() if len(ln.strip()) > 20]
+        return {"y_chinh": lines[:2], "yeu_cau": [ln for ln in lines if "phải" in ln or "chủ trì" in ln][:2]}
+    if task == "phan-tich-tong":
+        notes = [ln[2:] for ln in user.splitlines() if ln.startswith("- ")]
+        return {"tom_tat": "Văn bản quy định nội dung quản lý thiết bị và chứng thư số.", "noi_dung_chinh": notes[:4]}
+    if task == "phan-tich-tieu-chi":
+        m = re.search(r"\[D1\][^\n]*\n(.+)", user)
+        first = re.split(r"(?<=[.;])\s", m.group(1).strip())[0] if m else ""
+        return {"de_cap": True, "nhan_dinh": "Văn bản có nội dung liên quan tới tiêu chí.", "muc_do": "cao",
+                "trich_dan": [first.strip("-*0123456789. ")[:200], "Câu trích dẫn bịa không hề có trong văn bản gốc."],
+                "de_xuat": "Đề nghị rà soát quy định hiện hành của đơn vị."}
+    if task == "soan-dan-y":
+        n = len(re.findall(r"^\d+\. ", user.split("CÁC PHẦN CỦA MẪU:")[-1].split("CĂN CỨ:")[0], re.M))
+        labels = re.findall(r"^\[(S\d+)\]", user, re.M)
+        return {"phan": [{"so": i + 1, "y": [f"Ý chính phần {i + 1}"], "nguon": labels[:1]} for i in range(n)]}
+    if task == "soan-phan":
+        m = re.search(r"\[1\][^\n]*\n(.+)", user)
+        first = re.split(r"(?<=[.;])\s", m.group(1).strip())[0].strip("-*0123456789. ") if m else ""
+        return (f"Theo quy định, {first} [1]. Đề xuất đơn vị chủ động triển khai thực hiện." if first
+                else "Đề xuất đơn vị chủ động triển khai thực hiện.")
+    if task == "gop-y-khia-canh":
+        # có vấn đề khi đoạn dự thảo giao Bộ Công an kiểm tra hệ thống cơ yếu, hoặc truyền bí mật qua Internet;
+        # căn cứ "Điều 99" (không có trong quy định đã cung cấp) để kiểm tra chương trình gắn "(cần đối chiếu)"
+        doan = user.split("ĐOẠN DỰ THẢO", 1)[-1].split("QUY ĐỊNH LIÊN QUAN", 1)[0]
+        if "Bộ Công an" in doan and "cơ yếu" in doan:
+            return {"co_van_de": True, "nhan_xet": "Giao Bộ Công an kiểm tra hệ thống thông tin cơ yếu chưa đúng thẩm quyền.",
+                    "de_nghi_sua": "Đề nghị sửa thành: Ban Cơ yếu Chính phủ chủ trì đối với hệ thống thông tin cơ yếu.",
+                    "can_cu": "Điều 99 Luật An ninh mạng", "muc_do": "cao"}
+        if "Internet" in doan and "bí mật" in doan:
+            return {"co_van_de": True, "nhan_xet": "Thông tin bí mật nhà nước chỉ đặt mật khẩu là chưa bảo đảm.",
+                    "de_nghi_sua": "Đề nghị sửa thành: phải được mã hóa bằng mật mã cơ yếu.", "can_cu": "", "muc_do": "cao"}
+        return {"co_van_de": False, "nhan_xet": "", "de_nghi_sua": "", "can_cu": "", "muc_do": "thap"}
+    if task == "gop-y-kien-nghi":
+        return {"kien_nghi": ["Đề nghị cơ quan chủ trì soạn thảo lấy ý kiến Ban Cơ yếu Chính phủ đối với nội dung về mật mã"]}
+    if task == "giam-dinh-mau-thuan":
+        return {"mau_thuan": True, "giai_thich": "Cùng nội dung thu hồi thiết bị nhưng thời hạn khác nhau."}
     return "OK"
 
 

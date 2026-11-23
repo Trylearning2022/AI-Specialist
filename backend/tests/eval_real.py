@@ -49,8 +49,15 @@ CASES = [
     # Câu hỏi gõ không dấu
     {"id": "A7", "q": "phong ky thuat kien nghi gi trong tuan 45", "mode": "tra_cuu", "route": "tra_cuu",
      "answer_has": "10", "source_has": "Phòng Kỹ thuật"},
-    {"id": "R1", "q": "máy in không in được, đèn vẫn sáng", "route": "ho_tro", "tree": "may-in-khong-in",
-     "no_refuse": True},
+    # Hỗ trợ kỹ thuật gộp vào hỏi đáp: các bước trích từ tài liệu hướng dẫn (kb-seed/tai-lieu/huong-dan-xu-ly-*.md)
+    {"id": "R1", "q": "máy in không in được, đèn vẫn sáng", "route": "ho_tro", "no_refuse": True,
+     "source_has": "máy in", "answer_all": ["Print Spooler"]},
+    {"id": "R3", "q": "USB Token cắm vào máy tính không nhận, đèn không sáng", "route": "ho_tro", "no_refuse": True,
+     "answer_all": ["cổng USB", "middleware"]},
+    # Câu hỏi mơ hồ → hỏi lại (không tốn mô hình)
+    {"id": "C1", "q": "bị lỗi rồi, không dùng được", "route": "lam_ro", "clarify": True},
+    # Bảo vệ an toàn thông tin: chặn bí mật xác thực
+    {"id": "G1", "q": "mã PIN của tôi là 12345678, sao ký không được?", "route": "bao_ve"},
     {"id": "R2", "q": "Xin chào", "route": "chao_hoi"},
 ]
 REFUSE_HINTS = ("không tìm thấy", "không có thông tin", "chưa có thông tin", "không đủ thông tin", "không có trong")
@@ -106,8 +113,8 @@ def judge(case: dict, r: dict) -> list[str]:
         errs.append("không từ chối khi tài liệu không có thông tin (nguy cơ bịa)")
     if case.get("no_refuse") and any(h in ans.lower() for h in REFUSE_HINTS):
         errs.append("trả lời “không tìm thấy” dù đã gợi ý hướng dẫn xử lý (gây hiểu nhầm)")
-    if case.get("tree") and case["tree"] not in [t.get("id") for t in r.get("trees") or []]:
-        errs.append(f"không gợi ý cây xử lý sự cố \"{case['tree']}\"")
+    if case.get("clarify") and not r.get("clarify"):
+        errs.append("không hỏi lại dù câu hỏi chưa rõ")
     v = r.get("verify") or {}
     if v.get("invalid_citations"):
         errs.append(f"trích dẫn không tồn tại: {v['invalid_citations']}")
@@ -147,8 +154,8 @@ def main():
                   f" (chữ đầu {r.get('_first')!s:>5} s)  {case['q'][:56]}")
             for e in errs:
                 print(f"         - {e}")
-            if r.get("trees"):
-                print(f"         ⤷ cây xử lý sự cố gợi ý: {', '.join(t['ten'] for t in r['trees'])}")
+            if r.get("clarify"):
+                print(f"         ⤷ hỏi lại: {', '.join(o['label'] for o in r['clarify']['options'][:4])}")
             print(f"         → {ans if a.show else ans[:160]}")
             results.append({"case": case, "ok": ok, "errors": errs, "seconds": r.get("_seconds"),
                             "first_seconds": r.get("_first"),

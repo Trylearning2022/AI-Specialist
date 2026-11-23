@@ -1,18 +1,13 @@
 <template>
   <div class="page">
-    <PageHeader title="Hỗ trợ kỹ thuật" icon="wrench" desc="Xử lý sự cố theo hướng dẫn từng bước; tạo và theo dõi phiếu yêu cầu hỗ trợ." />
+    <PageHeader title="Phiếu hỗ trợ kỹ thuật" icon="ticket" desc="Tạo, theo dõi phiếu yêu cầu hỗ trợ; ghi kết quả xử lý và đề xuất bổ sung tri thức." />
     <div class="cols">
       <div>
-        <div class="card">
-          <h3>Xử lý sự cố theo hướng dẫn từng bước</h3>
-          <TreeRunner v-if="cur" :key="cur.id" :tree="cur" autostart @ticket="loadTickets" />
-          <div v-if="cur" style="margin-top:.6rem"><a class="small" @click="cur = null"><Icon name="left" :size="13" /> Chọn sự cố khác</a></div>
-          <template v-else>
-            <div v-for="t in trees" :key="t.id" class="src">
-              <a @click="cur = t"><b>{{ t.ten }}</b></a><div class="muted small">{{ t.mo_ta }}</div>
-            </div>
-            <p v-if="!trees.length" class="empty">Chưa có cây xử lý sự cố.</p>
-          </template>
+        <div class="card tip-card">
+          <h3><Icon name="wrench" :size="16" /> Xử lý sự cố ngay trong trò chuyện</h3>
+          <p class="muted small">Mô tả sự cố trong ô trò chuyện (thiết bị, biểu hiện, thông báo lỗi). Trợ lý trích các bước xử lý từ tài liệu
+            kỹ thuật của đơn vị, hỏi lại khi chưa rõ thiết bị hoặc triệu chứng; nếu chưa khắc phục được, tạo phiếu ngay từ câu trả lời.</p>
+          <router-link class="btn sm" :to="{ path: '/', query: {} }" @click="prefill('', 'ho_tro')"><Icon name="chat" :size="14" /> Hỏi trợ lý</router-link>
         </div>
         <div class="card">
           <h3>Tạo phiếu yêu cầu hỗ trợ</h3>
@@ -46,23 +41,17 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import { api } from '../api'
 import { has } from '../auth'
 import { STATUS, fmtDate } from '../md'
 import { promptBox, toast } from '../ui'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
-import TreeRunner from '../components/TreeRunner.vue'
+import { prefill } from '../chat'
 
-const route = useRoute()
-const trees = ref([]), tickets = ref([]), cur = ref(null), all = ref(false), tf = reactive({ title: '', description: '' })
+const tickets = ref([]), all = ref(false), tf = reactive({ title: '', description: '' })
 
-onMounted(async () => {
-  trees.value = await api.get('/support/trees')
-  await loadTickets()
-  if (route.query.tree) cur.value = trees.value.find((t) => t.id === route.query.tree) || null
-})
+onMounted(loadTickets)
 async function loadTickets() { tickets.value = await api.get('/support/tickets', { all: all.value }) }
 async function createTicket() {
   await api.post('/support/tickets', { ...tf }); tf.title = tf.description = ''

@@ -1,4 +1,6 @@
-"""Tác vụ nền của phân hệ nạp: chuyển đổi → làm sạch → metadata → chất lượng → trùng lặp."""
+"""Tác vụ nền của phân hệ nạp:
+    process : chuyển đổi → làm sạch → metadata → chất lượng → trùng lặp           (sau khi tải lên)
+    approve : lập chỉ mục (Luồng A, B) và ghi kho Git văn bản chuẩn (Luồng B cấp 2) (sau khi bấm duyệt)"""
 import logging
 from pathlib import Path
 
@@ -6,14 +8,17 @@ from sqlalchemy import select
 
 from aicommon.audit import emit
 from aicommon.config import get_settings
-from aicommon.db import init_db, session
+from aicommon.db import init_db, session, utcnow
+from aicommon.internal import ServiceError, SyncSvc
 from aicommon.markdown import split_frontmatter
 from aicommon.queue import celery_app
+from aicommon.security import UserCtx
 
 from .cleaning import clean_markdown, minhash, minhash_from, quality
 from .convert import convert
 from .metadata import extract
-from .models import CHO_DUYET, DANG_XU_LY, LOI, TU_CHOI, Document, Job
+from .models import CHO_DUYET, DA_DUYET, DANG_DUYET, DANG_XU_LY, LOI, TU_CHOI, Document, Job
+from .registry import upsert_document
 
 log = logging.getLogger("ingest.worker")
 S = get_settings()
@@ -82,3 +87,56 @@ def process_job(job_id: str):
 @celery_app.task(name="ingest.process", bind=True, max_retries=2, default_retry_delay=60)
 def process(self, job_id: str):
     process_job(job_id)
+
+
+# [TINH CHỈNH] Thời gian chờ tối đa cho một lần lập chỉ mục / ghi kho (giây). Tài liệu dài trên CPU: sinh vector
+# hàng trăm đoạn có thể mất nhiều phút.
+APPROVE_TIMEOUT_S = 3600
+
+
+def approve_job(job_id: str):
+    """Thực hiện phần nặng của việc duyệt (đã kiểm tra quyền, điều kiện ở API). Lỗi → trả tác vụ về trạng thái
+    chờ duyệt trước đó kèm nguyên nhân để duyệt lại; lập chỉ mục và ghi kho đều ghi đè an toàn (idempotent)."""
+    _init()
+    S.service_name = "ingest"  # danh tính dịch vụ khi gọi exact-svc /kb/commit, search-svc /index
+    with session() as s:
+        j = s.get(Job, job_id)
+        p = (j.meta or {}).get("_approve") if j else None
+        if not j or j.status != DANG_DUYET or not p:
+            return
+    user = UserCtx(**p["user"])
+    search, exact = SyncSvc(S.search_url, timeout=APPROVE_TIMEOUT_S), SyncSvc(S.exact_url, timeout=APPROVE_TIMEOUT_S)
+    try:
+        commit = ""
+        if p["track"] == "B":
+            r = exact.call("POST", "/kb/commit", user, json={"doc_id": p["doc_id"], "content": p["md"],
+                                                            "author": user.username, "message": p["message"]})
+            commit = r["commit"]
+        search.call("POST", "/index", user, json={"doc_id": p["doc_id"], "markdown": p["md"], "title": p["meta"].get("ten", ""),
+                                                 "meta": p["meta"], "nguon": p["track"]})
+        with session() as s:
+            j = s.get(Job, job_id)
+            upsert_document(s, p["doc_id"], p["track"], p["meta"], j, p["md"], commit=commit)
+            j.status, j.doc_id, j.error = DA_DUYET, p["doc_id"], ""
+            if p["track"] == "B":
+                j.markdown = p["md"]
+            j.approvals = [*j.approvals, {"user": user.username, "at": utcnow().isoformat(), "track": p["track"]}]
+            j.meta = {k: v for k, v in j.meta.items() if k != "_approve"}
+        if p["track"] == "A":
+            emit(user.username, "ingest.approve", job_id, {"track": "A", "doc_id": p["doc_id"]})
+        else:
+            emit(user.username, "ingest.approve_l2", job_id, {"track": "B", "doc_id": p["doc_id"], "commit": commit})
+        log.info("Đã duyệt %s → %s (Luồng %s)", job_id, p["doc_id"], p["track"], extra={"event": "ingest.approved"})
+    except Exception as e:
+        detail = e.detail if isinstance(e, ServiceError) else f"{type(e).__name__}: {e}"
+        log.warning("Ghi vào kho lỗi %s: %s", job_id, detail)
+        with session() as s:
+            j = s.get(Job, job_id)
+            j.status = p.get("from") or CHO_DUYET
+            j.error = f"Duyệt chưa hoàn tất – {detail}"[:2000]
+            j.meta = {k: v for k, v in j.meta.items() if k != "_approve"}
+
+
+@celery_app.task(name="ingest.approve")
+def approve(job_id: str):
+    approve_job(job_id)

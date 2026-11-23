@@ -16,18 +16,19 @@ from aicommon.internal import ServiceError, SyncSvc, as_http
 from aicommon.markdown import dump_frontmatter, insert_ids, slugify, split_frontmatter
 from aicommon.security import UserCtx, can_access, current_user, require
 
-from .cleaning import minhash, minhash_bytes
-from .models import (CHO_DUYET, CHO_DUYET_CAP_2, DA_DUYET, LOI, MOI, TU_CHOI, Document, Job)
+from .models import (CHO_DUYET, CHO_DUYET_CAP_2, DA_DUYET, DANG_DUYET, LOI, MOI, TU_CHOI, Document, Job)
+from .registry import DOCS
 
 app = create_app("ingest")
 S = get_settings()
 ORIG = Path(S.data_dir) / "originals"
-DOCS = Path(S.data_dir) / "docs"
 search_svc = SyncSvc(S.search_url)
 exact_svc = SyncSvc(S.exact_url)
+# Nhóm tài liệu (trường "nhom"): phân biệt kho văn bản đơn vị đã ban hành với tài liệu tham khảo khác
+NHOM = {"van_ban_di": "Văn bản đơn vị đã ban hành", "van_ban_den": "Văn bản đến", "tai_lieu": "Tài liệu tham khảo"}
 LOAI_PREFIX = {"quyet_dinh": "QD", "thong_tu": "TT", "nghi_dinh": "ND", "quy_dinh": "QyD", "huong_dan": "HD",
                "ke_hoach": "KH", "bao_cao": "BC", "cong_van": "CV", "to_trinh": "TTr", "bien_ban": "BB",
-               "su_co": "SC", "tai_lieu_ky_thuat": "TLKT"}
+               "su_co": "SC", "tai_lieu_ky_thuat": "TLKT", "luat": "LUAT", "phap_lenh": "PL"}
 
 
 @app.on_event("startup")
@@ -44,7 +45,7 @@ def _enqueue(job_id: str):
 
 def _job_out(j: Job, full: bool = False) -> dict:
     d = {"id": j.id, "filename": j.filename, "kind": j.kind, "status": j.status, "uploader": j.uploader,
-         "size": j.size, "meta": j.meta, "quality": j.quality, "warnings": j.warnings, "duplicates": j.duplicates,
+         "size": j.size, "sha256": j.sha256, "meta": {k: v for k, v in (j.meta or {}).items() if not k.startswith("_")}, "quality": j.quality, "warnings": j.warnings, "duplicates": j.duplicates,
          "target": j.target, "approvals": j.approvals, "doc_id": j.doc_id, "error": j.error,
          "reject_reason": j.reject_reason, "created_at": j.created_at, "updated_at": j.updated_at}
     if full:
@@ -63,7 +64,8 @@ def _check_meta(meta: dict, user: UserCtx):
 # ---------------- Tác vụ nạp ----------------
 @app.post("/jobs")
 async def upload(file: UploadFile = File(...), do_mat: int = Form(0), don_vi: str = Form("chung"),
-                 loai: str = Form(""), user: UserCtx = Depends(current_user)):
+                 loai: str = Form(""), nhom: str = Form(""), user: UserCtx = Depends(current_user)):
+    """nhom: "van_ban_di" – văn bản đơn vị đã ban hành (tờ trình, công văn góp ý…), dùng làm tiền lệ khi tham mưu."""
     data = await file.read()
     if len(data) > S.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"Tệp vượt quá {S.max_upload_mb} MB")
@@ -72,6 +74,10 @@ async def upload(file: UploadFile = File(...), do_mat: int = Form(0), don_vi: st
     meta = {"do_mat": do_mat, "don_vi": [u.strip() for u in don_vi.split(",") if u.strip()] or ["chung"]}
     if loai:
         meta["loai"] = loai
+    if nhom:
+        if nhom not in NHOM:
+            raise HTTPException(422, f"Nhóm tài liệu không hợp lệ: {nhom}")
+        meta["nhom"] = nhom
     _check_meta(meta, user)
     sha = hashlib.sha256(data).hexdigest()
     name = Path(file.filename or "tai-lieu").name[:200]
@@ -199,77 +205,55 @@ class Approve(BaseModel):
     doc_id: str | None = None
 
 
-def _upsert_document(s, doc_id: str, track: str, meta: dict, j: Job, md: str, commit: str = ""):
-    path = DOCS / f"{doc_id}.md"
-    path.write_text(md, encoding="utf-8")
-    d = s.get(Document, doc_id)
-    if d is None:
-        d = Document(doc_id=doc_id, track=track, version=0)
-        s.add(d)
-    d.version += 1
-    d.track, d.title, d.so_hieu = track, str(meta.get("ten", doc_id))[:500], str(meta.get("so_hieu", ""))
-    d.loai, d.do_mat, d.don_vi = meta.get("loai", "khac"), int(meta.get("do_mat", 0) or 0), meta.get("don_vi") or ["chung"]
-    d.ngay_ban_hanh, d.trang_thai = str(meta.get("ngay_ban_hanh", "") or "")[:10], meta.get("trang_thai", "con_hieu_luc")
-    d.sha256, d.job_id, d.path, d.commit = j.sha256, j.id, str(path), commit
-    d.minhash = minhash_bytes(minhash(md))
-    return d
-
-
 @app.post("/jobs/{jid}/approve")
 def approve(jid: str, req: Approve, user: UserCtx = Depends(require("reviewer", "admin"))):
+    """Duyệt tài liệu. Kiểm tra quyền, điều kiện duyệt ngay tại đây; phần nặng (sinh vector, lập chỉ mục, ghi kho
+    Git văn bản chuẩn) chạy ở tiến trình nền (worker.approve_job) – trạng thái chuyển "dang_duyet", giao diện thăm dò
+    tới khi "da_duyet" hoặc báo lỗi. Tránh giữ yêu cầu HTTP hàng phút với tài liệu dài trên CPU (hết thời gian chờ,
+    kết nối bị ngắt giữa chừng)."""
     with session() as s:
         j = _get_job(s, jid, user)
+        if j.status == DANG_DUYET:
+            raise HTTPException(409, "Tài liệu đang được ghi vào kho, vui lòng chờ")
         if j.status not in (CHO_DUYET, CHO_DUYET_CAP_2):
             raise HTTPException(409, f"Tác vụ ở trạng thái {j.status}, không duyệt được")
         meta = {k: v for k, v in j.meta.items() if not k.startswith("_")}
         if req.track == "A":
+            if j.status == CHO_DUYET_CAP_2:
+                raise HTTPException(409, "Tài liệu đang chờ duyệt cấp 2 Luồng B")
             doc_id = req.doc_id or j.doc_id or _doc_id_a(meta, j.id)
             md = dump_frontmatter({"id": doc_id, **meta, "nguoi_duyet": user.username}, split_frontmatter(j.markdown)[1])
-            try:
-                search_svc.call("POST", "/index", user, json={"doc_id": doc_id, "markdown": md, "title": meta.get("ten", ""),
-                                                             "meta": meta, "nguon": "A"})
-            except ServiceError as e:
-                raise as_http(e)
-            _upsert_document(s, doc_id, "A", meta, j, md)
-            j.status, j.target, j.doc_id = DA_DUYET, "A", doc_id
-            j.approvals = [*j.approvals, {"user": user.username, "at": utcnow().isoformat(), "track": "A"}]
-            emit(user.username, "ingest.approve", jid, {"track": "A", "doc_id": doc_id})
-            return _job_out(j)
-
-        # Luồng B: bắt buộc duyệt hai cấp bởi hai cán bộ khác nhau
-        missing = [k for k in ("so_hieu", "ten") if not meta.get(k)]
-        if missing:
-            raise HTTPException(422, f"Văn bản chuẩn cần đủ thông tin: {', '.join(missing)}")
-        if j.status == CHO_DUYET:
-            j.approvals = [{"user": user.username, "at": utcnow().isoformat(), "track": "B"}]
-            j.status, j.target = CHO_DUYET_CAP_2, "B"
-            j.doc_id = req.doc_id or j.doc_id or _doc_id_b(meta, j.id)
-            emit(user.username, "ingest.approve_l1", jid, {"track": "B", "doc_id": j.doc_id})
-            return _job_out(j)
-        if any(a["user"] == user.username for a in j.approvals):
-            raise HTTPException(409, "Duyệt cấp 2 phải do cán bộ khác với người duyệt cấp 1 thực hiện")
-        doc_id = j.doc_id or _doc_id_b(meta, j.id)
-        fm = {"id": doc_id, "so_hieu": meta.get("so_hieu"), "ten": meta.get("ten"), "loai": meta.get("loai", "khac"),
-              "co_quan_ban_hanh": meta.get("co_quan_ban_hanh", ""), "ngay_ban_hanh": meta.get("ngay_ban_hanh", ""),
-              "hieu_luc_tu": meta.get("hieu_luc_tu", ""), "trang_thai": meta.get("trang_thai", "con_hieu_luc"),
-              "thay_the_boi": meta.get("thay_the_boi"), "do_mat": int(meta.get("do_mat", 0) or 0),
-              "don_vi": meta.get("don_vi") or ["chung"], "don_vi_quan_ly": meta.get("don_vi_quan_ly", ""),
-              "nguoi_soan": j.approvals[0]["user"], "nguoi_duyet": user.username, "sha256_ban_goc": j.sha256}
-        body = insert_ids(doc_id, split_frontmatter(j.markdown)[1])
-        md = dump_frontmatter(fm, body)
-        try:
-            r = exact_svc.call("POST", "/kb/commit", user, json={
-                "doc_id": doc_id, "content": md, "author": user.username,
-                "message": f"Duyệt văn bản {fm['so_hieu']} – {fm['ten']} (soạn: {fm['nguoi_soan']}, duyệt: {user.username})"})
-            search_svc.call("POST", "/index", user, json={"doc_id": doc_id, "markdown": md, "title": fm["ten"],
-                                                         "meta": {**meta, **fm}, "nguon": "B"})
-        except ServiceError as e:
-            raise as_http(e)
-        _upsert_document(s, doc_id, "B", {**meta, **fm}, j, md, commit=r["commit"])
-        j.status, j.doc_id, j.markdown = DA_DUYET, doc_id, md
-        j.approvals = [*j.approvals, {"user": user.username, "at": utcnow().isoformat(), "track": "B"}]
-        emit(user.username, "ingest.approve_l2", jid, {"track": "B", "doc_id": doc_id, "commit": r["commit"]})
-        return _job_out(j)
+            pending = {"track": "A", "doc_id": doc_id, "md": md, "meta": meta, "from": j.status}
+        else:
+            # Luồng B: bắt buộc duyệt hai cấp bởi hai cán bộ khác nhau
+            missing = [k for k in ("so_hieu", "ten") if not meta.get(k)]
+            if missing:
+                raise HTTPException(422, f"Văn bản chuẩn cần đủ thông tin: {', '.join(missing)}")
+            if j.status == CHO_DUYET:
+                j.approvals = [{"user": user.username, "at": utcnow().isoformat(), "track": "B"}]
+                j.status, j.target = CHO_DUYET_CAP_2, "B"
+                j.doc_id = req.doc_id or j.doc_id or _doc_id_b(meta, j.id)
+                emit(user.username, "ingest.approve_l1", jid, {"track": "B", "doc_id": j.doc_id})
+                return _job_out(j)
+            if any(a["user"] == user.username for a in j.approvals):
+                raise HTTPException(409, "Duyệt cấp 2 phải do cán bộ khác với người duyệt cấp 1 thực hiện")
+            doc_id = j.doc_id or _doc_id_b(meta, j.id)
+            fm = {"id": doc_id, "so_hieu": meta.get("so_hieu"), "ten": meta.get("ten"), "loai": meta.get("loai", "khac"),
+                  "co_quan_ban_hanh": meta.get("co_quan_ban_hanh", ""), "ngay_ban_hanh": meta.get("ngay_ban_hanh", ""),
+                  "hieu_luc_tu": meta.get("hieu_luc_tu", ""), "trang_thai": meta.get("trang_thai", "con_hieu_luc"),
+                  "thay_the_boi": meta.get("thay_the_boi"), "do_mat": int(meta.get("do_mat", 0) or 0),
+                  "don_vi": meta.get("don_vi") or ["chung"], "don_vi_quan_ly": meta.get("don_vi_quan_ly", ""),
+                  "nguoi_soan": j.approvals[0]["user"], "nguoi_duyet": user.username, "sha256_ban_goc": j.sha256}
+            md = dump_frontmatter(fm, insert_ids(doc_id, split_frontmatter(j.markdown)[1]))
+            pending = {"track": "B", "doc_id": doc_id, "md": md, "meta": {**meta, **fm}, "from": j.status,
+                       "message": f"Duyệt văn bản {fm['so_hieu']} – {fm['ten']} (soạn: {fm['nguoi_soan']}, duyệt: {user.username})"}
+        pending["user"] = user.model_dump()
+        j.meta = {**j.meta, "_approve": pending}
+        j.status, j.target, j.doc_id, j.error = DANG_DUYET, req.track, doc_id, ""
+        out = _job_out(j)
+    from .worker import approve as approve_task
+    approve_task.delay(jid)
+    return out
 
 
 class Reject(BaseModel):

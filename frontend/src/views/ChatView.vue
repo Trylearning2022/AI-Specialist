@@ -12,7 +12,7 @@
         <div v-if="!chat.messages.length" class="welcome">
           <img src="/logo.png" class="welcome-logo" alt="" />
           <h2>Xin chào{{ name ? ' đồng chí ' + name : '' }}</h2>
-          <p class="muted">Trợ lý AI nội bộ – tra cứu văn bản, hỏi đáp tài liệu, hỗ trợ kỹ thuật. Mọi dữ liệu xử lý trong mạng nội bộ.</p>
+          <p class="muted">Trợ lý AI nội bộ – tra cứu văn bản, hỗ trợ kỹ thuật, phân tích văn bản mới, soạn văn bản tham mưu. Mọi dữ liệu xử lý trong mạng nội bộ.</p>
           <div class="suggest">
             <button v-for="s in SUGGESTIONS" :key="s.q" class="sugg" @click="ask(s.q, s.mode)">
               <span class="sugg-ico"><Icon :name="s.icon" :size="18" /></span>
@@ -74,9 +74,10 @@ async function load() {
 watch(() => route.params.id, load)
 onMounted(load)
 
-function ask(text, mode) {
+function ask(text, att = [], mode) {
+  if (typeof att === 'string') { mode = att; att = [] }  // gọi từ gợi ý: ask(câu hỏi, chế độ)
   atBottom.value = true
-  send(text, { mode, onConv: (id) => router.replace('/c/' + id) })
+  send(text, { mode, attachments: att, onConv: (id) => router.replace('/c/' + id) })
   scroll(true)
 }
 function fresh() { newConv(); router.push('/'); comp.value?.focus() }

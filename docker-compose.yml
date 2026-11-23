@@ -58,10 +58,27 @@ x-app-env: &app-env
   SUMMARY_URL: http://summary:8000
   SUPPORT_URL: http://support:8000
   AUDIT_URL: http://audit:8000
+  AGENT_URL: http://agent:8000
+  # 1.3.0 – hồ sơ phần cứng, hỏi lại, bảo vệ ATTT, tác vụ dài, giám định dữ liệu, giám sát (aicommon/config.py)
+  HARDWARE_PROFILE: ${HARDWARE_PROFILE:-cpu}
+  CLARIFY_ENABLED: ${CLARIFY_ENABLED:-true}
+  CLARIFY_MAX_SCORE: ${CLARIFY_MAX_SCORE:-0.0}
+  GUARD_ENABLED: ${GUARD_ENABLED:-true}
+  AGENT_YIELD_MAX_S: ${AGENT_YIELD_MAX_S:-180}
+  AGENT_PART_TOKENS: ${AGENT_PART_TOKENS:-3000}
+  AGENT_MAX_CRITERIA: ${AGENT_MAX_CRITERIA:-20}
+  AGENT_PRECEDENTS: ${AGENT_PRECEDENTS:-2}
+  AGENT_GOPY_MAX_PASSAGES: ${AGENT_GOPY_MAX_PASSAGES:-8}
+  AGENT_GOPY_DEF_SIMILARITY: ${AGENT_GOPY_DEF_SIMILARITY:-0.5}
+  AGENT_DRAFT_CTX: ${AGENT_DRAFT_CTX:-2500}
+  QA_INTERVAL_MIN: ${QA_INTERVAL_MIN:-120}
+  QA_LLM_MODE: ${QA_LLM_MODE:-auto}
+  QA_LLM_HOURS: ${QA_LLM_HOURS:-22-6}
+  TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
 
 x-app: &app
-  image: ${IMG_APP:-ai-local/backend:1.0.0}
-  build: { context: ., dockerfile: backend/Dockerfile }
+  image: ${IMG_APP:-ai-local/backend:1.4.4}
+  build: { context: ., dockerfile: backend/Dockerfile, args: { INSTALL_LIBREOFFICE: "${INSTALL_LIBREOFFICE:-0}", PIP_OFFLINE: "${PIP_OFFLINE:-0}" } }
   restart: unless-stopped
   environment: *app-env
   read_only: true
@@ -123,7 +140,7 @@ services:
     depends_on: { postgres: { condition: service_healthy } }
 
   portal:
-    image: ${IMG_PORTAL:-ai-local/portal:1.0.0}
+    image: ${IMG_PORTAL:-ai-local/portal:1.4.4}
     build: { context: ., dockerfile: frontend/Dockerfile }
     restart: unless-stopped
     networks: [app]
@@ -178,12 +195,25 @@ services:
     # 01 bản duy nhất để bảo đảm thứ tự chuỗi băm nhật ký kiểm toán
     command: ["python", "-m", "uvicorn", "services.audit.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
+  agent:
+    <<: *app
+    # Tác vụ dài (phân tích, soạn thảo, tổng hợp), giám định dữ liệu; đọc sổ đăng ký tài liệu → dùng chung appdata
+    command: ["python", "-m", "uvicorn", "services.agent.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: ["appdata:/data"]
+
+  agent-worker:
+    <<: *app
+    # 01 tiến trình trên CPU: tác vụ dài lần lượt dùng mô hình, nhường cho hỏi đáp trực tiếp (aicommon/priority.py)
+    command: ["celery", "-A", "aicommon.queue", "worker", "-Q", "agent", "-c", "${AGENT_WORKERS:-1}", "-n", "agent@%h", "--loglevel=INFO"]
+    volumes: ["appdata:/data"]
+    healthcheck: { disable: true }
+
   tools:
     <<: *app
     profiles: [tools]
     restart: "no"
     command: ["python", "-m", "tools.seed", "/seed"]
-    volumes: ["./kb-seed:/seed:ro", "appdata:/data"]
+    volumes: ["./kb-seed:/seed:ro", "./kb-nganh:/kb-nganh:ro", "appdata:/data"]
     healthcheck: { disable: true }
 
   # ------------------------- Lớp mô hình (không có đường ra ngoài) -------------------------

@@ -18,10 +18,10 @@ export const DO_MAT = { 0: 'Thường', 1: 'Mật', 2: 'Tối mật', 3: 'Tuyệ
 export const LOAI = {
   quyet_dinh: 'Quyết định', thong_tu: 'Thông tư', nghi_dinh: 'Nghị định', quy_dinh: 'Quy định',
   huong_dan: 'Hướng dẫn', ke_hoach: 'Kế hoạch', bao_cao: 'Báo cáo', cong_van: 'Công văn', to_trinh: 'Tờ trình',
-  bien_ban: 'Biên bản', su_co: 'Sự cố', tai_lieu_ky_thuat: 'Tài liệu kỹ thuật', khac: 'Khác',
+  bien_ban: 'Biên bản', su_co: 'Sự cố', tai_lieu_ky_thuat: 'Tài liệu kỹ thuật', luat: 'Luật', phap_lenh: 'Pháp lệnh', khac: 'Khác',
 }
 export const STATUS = {
-  moi: 'Mới', dang_xu_ly: 'Đang xử lý', cho_duyet: 'Chờ duyệt', cho_duyet_cap_2: 'Chờ duyệt cấp 2',
+  moi: 'Mới', dang_xu_ly: 'Đang xử lý', cho_duyet: 'Chờ duyệt', cho_duyet_cap_2: 'Chờ duyệt cấp 2', dang_duyet: 'Đang ghi vào kho',
   da_duyet: 'Đã duyệt', tu_choi: 'Từ chối', loi: 'Lỗi', cho: 'Chờ', dang_chay: 'Đang chạy', xong: 'Hoàn thành',
   da_xong: 'Đã xong', con_hieu_luc: 'Còn hiệu lực', het_hieu_luc: 'Hết hiệu lực', bi_thay_the: 'Bị thay thế',
 }

@@ -7,11 +7,11 @@ import contextlib
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 from fastapi import Depends
-from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, select
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aicommon.app import create_app
@@ -19,6 +19,8 @@ from aicommon.audit import STREAM
 from aicommon.config import get_settings
 from aicommon.db import Base, init_db, session
 from aicommon.security import UserCtx, require
+
+from .monitor import router as monitor_router
 
 log = logging.getLogger("audit")
 S = get_settings()
@@ -89,10 +91,11 @@ async def lifespan(app):
 
 
 app = create_app("audit", lifespan=lifespan)
+app.include_router(monitor_router)  # giám sát hệ thống: /monitor/overview, /monitor/logs, /monitor/health
 
 
 @app.get("/logs")
-def logs(actor: str = "", action: str = "", resource: str = "", limit: int = 200,
+def logs(actor: str = "", action: str = "", resource: str = "", limit: int = 200, hours: float = 0,
          user: UserCtx = Depends(require("admin"))):
     with session() as s:
         q = select(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 1000))
@@ -102,6 +105,8 @@ def logs(actor: str = "", action: str = "", resource: str = "", limit: int = 200
             q = q.where(AuditLog.action.like(f"{action}%"))
         if resource:
             q = q.where(AuditLog.resource == resource)
+        if hours:
+            q = q.where(AuditLog.ts >= datetime.now(timezone.utc) - timedelta(hours=hours))
         return [{"id": a.id, "ts": a.ts, "actor": a.actor, "action": a.action, "resource": a.resource,
                  "service": a.service, "detail": a.detail, "hash": a.hash} for a in s.scalars(q)]
 
@@ -118,3 +123,15 @@ def verify(user: UserCtx = Depends(require("admin"))):
                 return {"ok": False, "broken_at": a.id, "checked": n}
             prev, n = a.hash, n + 1
     return {"ok": True, "checked": n}
+
+
+@app.get("/actions")
+def actions(hours: float = 24, user: UserCtx = Depends(require("admin"))):
+    """Thống kê hành động kiểm toán theo loại và người thực hiện (phục vụ màn hình Giám sát)."""
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    with session() as s:
+        by_action = dict(s.execute(select(AuditLog.action, func.count()).where(AuditLog.ts >= since)
+                                   .group_by(AuditLog.action)).all())
+        by_actor = dict(s.execute(select(AuditLog.actor, func.count()).where(AuditLog.ts >= since)
+                                  .group_by(AuditLog.actor)).all())
+    return {"by_action": by_action, "by_actor": by_actor}

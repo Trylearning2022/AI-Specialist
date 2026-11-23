@@ -48,6 +48,29 @@ def get_skill(name: str) -> dict | None:
     return next((s for s in list_skills() if s["name"] == name), None)
 
 
+def domain_skills() -> list[dict]:
+    """Kỹ năng bối cảnh ngành (loai: nganh) – ví dụ skills/nganh-co-yeu. Có thể có nhiều; chỉ lấy loại mac_dinh."""
+    return [s for s in list_skills() if s["meta"].get("loai") == "nganh" and s["meta"].get("mac_dinh", True)]
+
+
+def domain_context() -> str:
+    """Phần thân các kỹ năng bối cảnh ngành – nối vào chỉ thị phân tích, soạn thảo, tổng hợp.
+    Tắt bằng biến môi trường DOMAIN_CONTEXT=0 (ví dụ khi đo thời gian trên CPU)."""
+    if os.getenv("DOMAIN_CONTEXT", "1") in ("0", "false", "off"):
+        return ""
+    return "\n\n".join(s["body"] for s in domain_skills() if s["body"])
+
+
+def expired_laws() -> list[dict]:
+    """Danh mục văn bản đã hết hiệu lực khai báo trong kỹ năng ngành (frontmatter van_ban_het_hieu_luc)."""
+    out = []
+    for s in domain_skills():
+        for x in s["meta"].get("van_ban_het_hieu_luc") or []:
+            if isinstance(x, dict) and x.get("so_hieu"):
+                out.append({k: str(v) for k, v in x.items()})
+    return out
+
+
 def skill_template(skill: dict) -> str:
     t = skill["meta"].get("output_template")
     return read_md(Path(skill["dir"]) / t) if t else ""

@@ -14,9 +14,10 @@ LOAI = ["quyet_dinh", "thong_tu", "nghi_dinh", "quy_dinh", "huong_dan", "ke_hoac
         "to_trinh", "bien_ban", "su_co", "tai_lieu_ky_thuat", "khac"]
 _LOAI_KW = [("QUYẾT ĐỊNH", "quyet_dinh"), ("THÔNG TƯ", "thong_tu"), ("NGHỊ ĐỊNH", "nghi_dinh"),
             ("QUY ĐỊNH", "quy_dinh"), ("HƯỚNG DẪN", "huong_dan"), ("KẾ HOẠCH", "ke_hoach"), ("BÁO CÁO", "bao_cao"),
-            ("TỜ TRÌNH", "to_trinh"), ("BIÊN BẢN", "bien_ban"), ("CÔNG VĂN", "cong_van")]
+            ("TỜ TRÌNH", "to_trinh"), ("BIÊN BẢN", "bien_ban"), ("CÔNG VĂN", "cong_van"),
+            ("LUẬT", "luat"), ("PHÁP LỆNH", "phap_lenh")]  # đặt cuối: "luật" hay xuất hiện trong phần căn cứ
 _SO = re.compile(r"Số\s*[:.]?\s*([0-9]{1,5}/(?:[0-9]{4}/)?[A-ZĐ][A-ZĐ0-9\-]*)")
-_SO2 = re.compile(r"\b([0-9]{1,5}/(?:[0-9]{4}/)?(?:QĐ|TT|NĐ|HD|KH|BC|CV|TTr|BB|QyĐ)[A-ZĐ0-9\-]*)\b")
+_SO2 = re.compile(r"\b([0-9]{1,5}/(?:[0-9]{4}/)?(?:QĐ|TT|NĐ|HD|KH|BC|CV|TTr|BB|QyĐ|QH|PL)[A-ZĐ0-9\-]*)\b")
 _NGAY = re.compile(r"ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})", re.I)
 
 

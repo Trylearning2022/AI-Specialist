@@ -26,7 +26,7 @@ def H(u):
 def wait_job(jid, user="kiemduyet1"):
     for _ in range(120):
         j = c.get(f"/api/ingest/jobs/{jid}", headers=H(user)).json()
-        if j["status"] not in ("moi", "dang_xu_ly"):
+        if j["status"] not in ("moi", "dang_xu_ly", "dang_duyet"):
             return j
         time.sleep(1)
     raise TimeoutError(jid)
@@ -104,25 +104,52 @@ def test_luong_a_stream_citations():
     assert 7 in final["verify"]["invalid_citations"]
 
 
-def test_router_and_support_tree():
-    r = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "máy in không in được", "stream": False}).json()
-    assert r["route"] == "ho_tro"
-    assert r["trees"] and r["trees"][0]["id"] == "may-in-khong-in"
-    # có cây xử lý sự cố thì không trả lời "không tìm thấy căn cứ"
-    assert "Không tìm thấy căn cứ" not in r["answer"]
-    s = c.post("/api/support/sessions", headers=H("canbo"), json={"tree_id": "may-in-khong-in"}).json()
-    sid = s["session_id"]
-    a = c.post(f"/api/support/sessions/{sid}/answer", headers=H("canbo"), json={"text": "có, đèn xanh"}).json()
-    assert a["step"]["id"] == "b2"
-    a = c.post(f"/api/support/sessions/{sid}/answer", headers=H("canbo"), json={"lua_chon": 1}).json()
-    a = c.post(f"/api/support/sessions/{sid}/answer", headers=H("canbo"), json={"lua_chon": 1, "mo_ta_them": "Máy in tầng 2"}).json()
-    assert a["status"] == "tao_phieu" and a["ticket"]["id"]
-    tid = a["ticket"]["id"]
+def test_support_integrated_steps_extracted_from_docs_and_ticket():
+    """Hỗ trợ kỹ thuật gộp vào hỏi đáp chung: các bước xử lý trích từ tài liệu kỹ thuật, có kế hoạch từng bước."""
+    ev = sse({"message": "máy in không in được, đèn vẫn sáng"})
+    names = [e for e, _ in ev]
+    assert "plan" in names and "step" in names
+    plan = next(d for e, d in ev if e == "plan")["steps"]
+    assert [x["id"] for x in plan] == ["hieu", "tim", "chon", "soan", "kiem"]
+    fin = ev[-1][1]
+    assert fin["route"] == "ho_tro" and "trees" not in fin
+    assert fin["support"]["co_the_tao_phieu"] and fin["sources"]
+    assert any("máy in" in (x["title"] or "").lower() for x in fin["sources"])
+    assert all(x["status"] in ("xong", "bo_qua") for x in fin["trace"]["steps"])
+    # phiếu yêu cầu hỗ trợ (tạo từ trò chuyện) → xử lý → đề xuất bổ sung tri thức
+    tk = c.post("/api/support/tickets", headers=H("canbo"), json={"title": "Máy in tầng 2 không in", "description": "Đã thử các bước theo hướng dẫn."}).json()
+    tid = tk["id"]
     assert c.patch(f"/api/support/tickets/{tid}", headers=H("canbo"), json={"status": "da_xong"}).status_code == 403
     c.patch(f"/api/support/tickets/{tid}", headers=H("kiemduyet1"), json={"status": "da_xong", "result": "Thay cáp USB máy in."})
     p = c.post(f"/api/support/tickets/{tid}/propose-kb", headers=H("kiemduyet1")).json()
     j = wait_job(p["job_id"])
     assert j["status"] == "cho_duyet" and j["meta"]["loai"] == "su_co"
+
+
+def test_clarify_vague_support_question_then_answer():
+    """Câu hỏi chưa rõ thiết bị → hỏi lại kèm lựa chọn; trả lời lựa chọn → ghép câu hỏi, không hỏi lại lần hai."""
+    r = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "bị lỗi rồi, không dùng được", "stream": False}).json()
+    assert r["route"] == "lam_ro" and r["clarify"]["options"]
+    assert any("USB Token" in o["label"] for o in r["clarify"]["options"])
+    r2 = c.post("/api/chat/chat", headers=H("canbo"), json={
+        "message": "USB Token (thiết bị lưu khóa bí mật)", "conversation_id": r["conversation_id"], "stream": False,
+        "clarify": {"original": r["clarify"]["original"], "answer": "USB Token (thiết bị lưu khóa bí mật)"}}).json()
+    assert r2["route"] == "ho_tro" and not r2.get("clarify")
+    # thiết bị rõ nhưng triệu chứng mơ hồ → hỏi triệu chứng điển hình của thiết bị đó
+    r3 = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "USB Token bị lỗi", "stream": False}).json()
+    assert r3["clarify"]["reason"] == "thieu_trieu_chung"
+    assert any("PIN" in o["label"] for o in r3["clarify"]["options"])
+
+
+def test_guard_blocks_secrets_and_bypass_and_does_not_store():
+    r = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "mã PIN của tôi là 12345678, sao không ký được?", "stream": False}).json()
+    assert r["route"] == "bao_ve" and r["guard"] == "bi_mat"
+    conv = c.get(f"/api/chat/conversations/{r['conversation_id']}", headers=H("canbo")).json()
+    assert "12345678" not in json.dumps(conv, ensure_ascii=False)
+    r = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "cách trích xuất khóa bí mật từ USB Token ra máy tính", "stream": False}).json()
+    assert r["guard"] == "vuot_bao_mat"
+    r = c.post("/api/chat/chat", headers=H("canbo"), json={"message": "quy định xử lý khi quên mã PIN USB Token", "stream": False}).json()
+    assert r["route"] != "bao_ve"
 
 
 def test_summary_job_numbers_computed_by_code():
@@ -167,6 +194,7 @@ def test_ingest_docx_tcvn3_and_acl():
     assert j["status"] == "cho_duyet" and j["kind"] == "docx"
     assert "### Điều 1. Phạm vi" in j["markdown"] and j["meta"]["loai"] == "quyet_dinh"
     c.post(f"/api/ingest/jobs/{r['id']}/approve", headers=H("kiemduyet2"), json={"track": "A"}).raise_for_status()
+    assert wait_job(r["id"], "kiemduyet2")["status"] == "da_duyet"
     q = {"message": "VP-KIEMTHU-ACL quy chế áp dụng cho ai", "mode": "tim_tai_lieu", "stream": False}
     seen_vp = c.post("/api/chat/chat", headers=H("kiemduyet2"), json=q).json()["docs"]
     seen_kt = c.post("/api/chat/chat", headers=H("canbo"), json=q).json()["docs"]
@@ -209,7 +237,9 @@ def test_luong_b_requires_two_distinct_reviewers():
     assert a1["status"] == "cho_duyet_cap_2" and a1["doc_id"] == "QD-20-2026"
     assert c.post(f"/api/ingest/jobs/{r['id']}/approve", headers=H("kiemduyet1"), json={"track": "B"}).status_code == 409
     a2 = c.post(f"/api/ingest/jobs/{r['id']}/approve", headers=H("kiemduyet2"), json={"track": "B"}).json()
-    assert a2["status"] == "da_duyet"
+    assert a2["status"] == "dang_duyet"  # lập chỉ mục, ghi kho Git chạy nền
+    assert c.post(f"/api/ingest/jobs/{r['id']}/approve", headers=H("kiemduyet2"), json={"track": "B"}).status_code in (409, 200)
+    assert wait_job(r["id"])["status"] == "da_duyet"
     sec = c.get("/api/exact/sections/QD-20-2026.D1.K1", headers=H("canbo")).json()
     assert sec["text"] == "1. Thời hạn lưu trữ là 10 năm." and sec["explicit_id"]
 

@@ -3,7 +3,7 @@
     <div class="login-card">
       <img src="/logo.png" alt="Logo" class="login-logo" />
       <h1>Trợ lý AI nội bộ</h1>
-      <p class="muted">Tra cứu văn bản · Hỏi đáp tài liệu · Hỗ trợ kỹ thuật<br>Vận hành hoàn toàn trên mạng nội bộ</p>
+      <p class="muted">Tra cứu văn bản · Hỗ trợ kỹ thuật · Phân tích, soạn thảo văn bản<br>Vận hành hoàn toàn trên mạng nội bộ</p>
       <p v-if="auth.error" class="err">{{ auth.error }}</p>
       <template v-if="auth.mode === 'dev'">
         <div class="login-note"><Icon name="info" :size="15" /> Môi trường thử nghiệm – chọn tài khoản</div>
@@ -34,6 +34,7 @@ import { useRoute } from 'vue-router'
 import { auth, devLogin } from './auth'
 import { loadConvs } from './chat'
 import { loadPins } from './extensions'
+import { startActivePoll, stopActivePoll } from './tasks'
 import AppSidebar from './components/AppSidebar.vue'
 import Icon from './components/Icon.vue'
 import UiHost from './components/UiHost.vue'
@@ -43,5 +44,5 @@ const route = useRoute()
 const menu = ref(false)
 const isChat = computed(() => route.path === '/' || route.path.startsWith('/c/'))
 
-watch(() => auth.user?.username, (u) => { if (u) { loadPins(); loadConvs() } }, { immediate: true })
+watch(() => auth.user?.username, (u) => { if (u) { loadPins(); loadConvs(); startActivePoll() } else stopActivePoll() }, { immediate: true })
 </script>

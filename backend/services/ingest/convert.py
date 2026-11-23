@@ -6,6 +6,9 @@
 """
 import io
 import logging
+import shutil
+import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -81,12 +84,40 @@ def _markitdown(data: bytes, filename: str) -> str:
     return res.text_content or ""
 
 
+def _soffice() -> str | None:
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+def ole_to_ooxml(data: bytes, filename: str) -> tuple[bytes, str]:
+    """Chuyển .doc/.xls (Office cũ – kho văn bản cũ của đơn vị thường ở dạng này) sang .docx/.xlsx bằng LibreOffice
+    chạy cục bộ, không mạng. Cần cài LibreOffice trong ảnh (Dockerfile: INSTALL_LIBREOFFICE=1)."""
+    exe = _soffice()
+    if not exe:
+        raise ValueError("Định dạng Office cũ (.doc/.xls): máy chủ chưa cài LibreOffice để tự chuyển đổi – "
+                         "lưu lại thành .docx/.xlsx trước khi nạp, hoặc xây dựng ảnh với INSTALL_LIBREOFFICE=1")
+    ext = Path(filename).suffix.lower()
+    target = "xlsx" if ext in (".xls", ".xlt") else "docx"
+    with tempfile.TemporaryDirectory(prefix="ole-") as tmp:
+        src = Path(tmp) / f"in{ext or '.doc'}"
+        src.write_bytes(data)
+        # hồ sơ người dùng riêng cho mỗi lần chạy: tránh xung đột khi nhiều tiến trình cùng chuyển đổi
+        r = subprocess.run([exe, f"-env:UserInstallation=file://{tmp}/profile", "--headless", "--norestore",
+                            "--convert-to", target, "--outdir", tmp, str(src)],
+                           capture_output=True, timeout=S.office_convert_timeout)
+        out = Path(tmp) / f"in.{target}"
+        if r.returncode != 0 or not out.exists():
+            raise ValueError(f"Không chuyển đổi được tệp Office cũ: {r.stderr.decode(errors='replace')[:300]}")
+        return out.read_bytes(), Path(filename).stem + "." + target
+
+
 def convert(data: bytes, filename: str) -> tuple[str, str, bool, list[str]]:
     """Trả (kind, markdown, có dùng OCR, cảnh báo)."""
     kind = detect_kind(data, filename)
     warns: list[str] = []
     if kind == "ole":
-        raise ValueError("Định dạng Office cũ (.doc/.xls) – đề nghị lưu lại thành .docx/.xlsx trước khi nạp")
+        data, filename = ole_to_ooxml(data, filename)
+        warns.append("Tệp Office cũ (.doc/.xls) đã được chuyển sang định dạng mới bằng LibreOffice – kiểm tra bảng biểu.")
+        kind = detect_kind(data, filename)
     if kind == "unknown":
         raise ValueError("Không nhận dạng được định dạng tệp")
     if kind in ("md", "txt", "csv"):

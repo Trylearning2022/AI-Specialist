@@ -13,7 +13,6 @@ from aicommon.security import UserCtx
 S = get_settings()
 search_svc = AsyncSvc(S.search_url)
 exact_svc = AsyncSvc(S.exact_url)
-support_svc = AsyncSvc(S.support_url)
 
 
 @dataclass
@@ -56,10 +55,6 @@ async def _list_catalog(user: UserCtx):
     return [{k: d[k] for k in ("doc_id", "so_hieu", "ten", "loai", "trang_thai")} for d in r["docs"]]
 
 
-async def _suggest_trees(user: UserCtx, query: str):
-    return await support_svc.call("GET", "/trees/suggest", user, params={"q": query})
-
-
 REGISTRY: dict[str, Tool] = {t.name: t for t in [
     Tool("search_docs", "Tìm kiếm ngữ nghĩa trong tài liệu tham khảo nội bộ (Luồng A). Trả các đoạn văn kèm nguồn.",
          {"type": "object", "properties": {"query": {"type": "string", "description": "Nội dung cần tìm"},
@@ -74,9 +69,6 @@ REGISTRY: dict[str, Tool] = {t.name: t for t in [
          _get_section, tags=["luong_b"]),
     Tool("list_catalog", "Liệt kê danh mục văn bản chuẩn người dùng được phép truy cập.",
          {"type": "object", "properties": {}}, _list_catalog, tags=["luong_b"]),
-    Tool("suggest_trees", "Gợi ý cây xử lý sự cố kỹ thuật phù hợp với mô tả sự cố.",
-         {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-         _suggest_trees, tags=["ho_tro"]),
 ]}
 
 

@@ -25,6 +25,17 @@
       <p v-if="!chat.convs.length" class="muted small pad">Chưa có cuộc trò chuyện nào.</p>
     </nav>
 
+    <div v-if="active.items.length" class="sb-tasks">
+      <div class="sb-label row">Tác vụ đang xử lý <span class="badge">{{ active.items.length }}</span>
+        <router-link to="/tac-vu" class="grow tr small" @click="$emit('close')">Tất cả</router-link></div>
+      <router-link v-for="t in active.items.slice(0, 4)" :key="t.id" :to="'/tac-vu/' + t.id" class="sb-task" @click="$emit('close')">
+        <Icon :name="TASK_KIND[t.kind]?.icon || 'tasks'" :size="15" />
+        <span class="grow"><span class="clamp1">{{ t.title }}</span>
+          <span class="sb-task-bar"><i :class="t.status" :style="{ width: Math.max(4, t.progress) + '%' }" /></span></span>
+        <small v-if="t.status === 'cho_xac_nhan'" class="tag warn-tag">Chờ xác nhận</small>
+      </router-link>
+    </div>
+
     <div class="sb-ext">
       <div class="sb-label row">Tiện ích <router-link to="/tien-ich" class="grow tr small" @click="$emit('close')">Tất cả</router-link></div>
       <router-link v-for="e in pinned" :key="e.id" :to="e.path" class="ext-link" @click="$emit('close')">
@@ -52,6 +63,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { auth, logout } from '../auth'
 import { chat, deleteConv, newConv, renameConv } from '../chat'
 import { pinnedExtensions } from '../extensions'
+import { TASK_KIND, active } from '../tasks'
 import { DO_MAT } from '../md'
 import { confirmBox, promptBox, setTheme, toast, ui } from '../ui'
 import Icon from './Icon.vue'

@@ -8,10 +8,13 @@
       <p class="small" style="margin:.2rem 0 0">PDF, DOCX, XLSX, PPTX, HTML, MD, TXT, CSV, ảnh quét</p>
       <p v-if="picked.length" class="small" style="margin:.4rem 0 0;color:var(--text)">Đã chọn: {{ picked.map((f) => f.name).join(', ') }}</p>
     </div>
-    <input ref="file" type="file" multiple hidden accept=".pdf,.docx,.xlsx,.pptx,.html,.htm,.md,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff" @change="picked = [...file.files]" />
+    <input ref="file" type="file" multiple hidden accept=".pdf,.doc,.docx,.xlsx,.pptx,.html,.htm,.md,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff" @change="picked = [...file.files]" />
     <div class="row" style="margin-top:.8rem">
       <label class="muted small">Độ mật <select v-model.number="doMat">
         <option v-for="i in allowedLevels" :key="i" :value="i">{{ DO_MAT[i] }}</option></select></label>
+      <label class="muted small" title="Văn bản đơn vị đã ban hành được dùng làm tiền lệ khi soạn văn bản, tham gia ý kiến">Nhóm <select v-model="nhom">
+        <option value="">Tài liệu tham khảo</option><option value="van_ban_di">Văn bản đơn vị đã ban hành</option>
+        <option value="van_ban_den">Văn bản đến</option></select></label>
       <label class="muted small grow">Phạm vi đơn vị <input v-model="donVi" style="width:100%" placeholder="chung hoặc mã đơn vị, cách nhau dấu phẩy" /></label>
       <button class="btn" :disabled="busy || !picked.length" @click="upload"><Icon name="upload" :size="15" /> Tải lên {{ picked.length || '' }}</button>
     </div>
@@ -21,7 +24,7 @@
   <div class="card">
     <div class="row" style="margin-bottom:.6rem"><h3 class="grow" style="margin:0">Tác vụ nạp</h3>
       <select v-model="status" @change="load"><option value="">Mọi trạng thái</option>
-        <option v-for="s in ['moi','dang_xu_ly','cho_duyet','cho_duyet_cap_2','da_duyet','tu_choi','loi']" :key="s" :value="s">{{ STATUS[s] }}</option></select>
+        <option v-for="s in ['moi','dang_xu_ly','cho_duyet','cho_duyet_cap_2','dang_duyet','da_duyet','tu_choi','loi']" :key="s" :value="s">{{ STATUS[s] }}</option></select>
       <button class="btn ghost" @click="load"><Icon name="refresh" :size="15" /> Làm mới</button></div>
     <table>
       <tr><th>Tệp</th><th>Thông tin</th><th>Chất lượng</th><th>Trạng thái</th><th></th></tr>
@@ -48,13 +51,13 @@ import { DO_MAT, LOAI, STATUS, fmtDate } from '../md'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
 
-const file = ref(null), jobs = ref([]), doMat = ref(0), donVi = ref('chung'), busy = ref(false)
+const file = ref(null), jobs = ref([]), doMat = ref(0), donVi = ref('chung'), nhom = ref(''), busy = ref(false)
 const msg = ref(''), err = ref(false), status = ref(''), picked = ref([]), over = ref(false)
 const statusTag = (s) => ({ da_duyet: 'ok', loi: 'err', tu_choi: 'err', cho_duyet: 'b', cho_duyet_cap_2: 'b' })[s] || ''
 function onDrop(e) { over.value = false; picked.value = [...(e.dataTransfer?.files || [])] }
 const allowedLevels = computed(() => [...Array(Math.min(auth.user.clearance, auth.user.system_max_clearance) + 1).keys()])
 let timer
-onMounted(() => { load(); timer = setInterval(() => { if (jobs.value.some((j) => ['moi', 'dang_xu_ly'].includes(j.status))) load() }, 3000) })
+onMounted(() => { load(); timer = setInterval(() => { if (jobs.value.some((j) => ['moi', 'dang_xu_ly', 'dang_duyet'].includes(j.status))) load() }, 3000) })
 onUnmounted(() => clearInterval(timer))
 async function load() { jobs.value = await api.get('/ingest/jobs', { status: status.value }) }
 async function upload() {
@@ -64,7 +67,7 @@ async function upload() {
   let ok = 0
   for (const f of files) {
     const fd = new FormData()
-    fd.append('file', f); fd.append('do_mat', doMat.value); fd.append('don_vi', donVi.value)
+    fd.append('file', f); fd.append('do_mat', doMat.value); fd.append('don_vi', donVi.value); if (nhom.value) fd.append('nhom', nhom.value)
     try { await api.upload('/ingest/jobs', fd); ok++ } catch (e) { err.value = true; msg.value = `${f.name}: ${e.message}` }
   }
   if (!err.value) msg.value = `Đã tải lên ${ok} tệp, đang xử lý.`
